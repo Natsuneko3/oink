@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """One local command builds a signed Mac DMG/ZIP or a Windows x64 MSI.
 
-No CI, installation, service registration or credential creation. Mac packaging
-launches the backend with temporary private state and desktop I/O disabled.
+No CI, installation, service registration or credential creation. Native Mac
+packaging launches the backend with temporary private state and desktop I/O disabled.
 """
 import argparse
 import json
@@ -35,6 +35,8 @@ def main():
     p.add_argument('--signing-fingerprint', default=os.environ.get('MACOS_SIGNING_FINGERPRINT'), help='Optional SHA1 of an existing Developer ID certificate')
     p.add_argument('--development-signing', action='store_true',
                    help='Mac development distribution: ad-hoc signing, without Developer ID or notarization')
+    p.add_argument('--development-cross-compile', action='store_true',
+                   help='Explicit Intel Mac to arm64 development build; native runtime checks are not run')
     p.add_argument('--notary-profile', default=os.environ.get('NOTARY_PROFILE'))
     p.add_argument('--notary-keychain', type=Path)
     p.add_argument('--notary-timeout', type=int, default=300)
@@ -45,6 +47,10 @@ def main():
         p.error('development signing is only available for Mac packages')
     if a.development_signing and (a.signing_fingerprint or a.notary_profile or a.notary_keychain):
         p.error('development signing cannot use a Developer ID identity or notary credentials')
+    if a.development_cross_compile and not (
+            a.platform == 'macos' and a.arch == 'arm64' and a.development_signing and
+            platform.system() == 'Darwin' and platform.machine().lower() == 'x86_64'):
+        p.error('development cross-compilation requires an Intel Mac, --arch arm64 and --development-signing')
     if a.windows_update_test_fail_health and not a.windows_update_test_feed:
         p.error('test health failure requires a test feed')
     from update_qualification import origin as test_origin
@@ -114,6 +120,8 @@ def main():
         command += ['--arch', a.arch, '--sparkle-cache', str(a.tool_cache), '--notary-timeout', str(a.notary_timeout)]
         if a.development_signing:
             command += ['--development-signing']
+        if a.development_cross_compile:
+            command += ['--development-cross-compile']
         for flag, value in [('--signing-fingerprint', a.signing_fingerprint),
                             ('--notary-profile', a.notary_profile), ('--notary-keychain', a.notary_keychain)]:
             if value:

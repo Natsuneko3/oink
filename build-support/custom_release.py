@@ -41,15 +41,39 @@ def validate(record, platform, build, commit, source):
     require(re.fullmatch('[0-9a-f]{40}', commit) is not None, 'invalid_commit')
     if platform == 'windows':
         require(record.get('signing') == 'unsigned' and record.get('updater_included') is True and
-                record.get('collector_included') is True, 'windows_development_package_required')
+                record.get('collector_included') is True and
+                record.get('development_cross_compile', False) is False, 'windows_development_package_required')
         suffixes = ['.msi']
     else:
         smoke = record.get('launch_smoke', {})
         require(record.get('signing') == 'ad-hoc' and record.get('development_signing') is True and
                 record.get('notarized') is False and record.get('team_id') is None and
-                smoke.get('status') == 'passed' and smoke.get('signed') is True and
-                smoke.get('seconds') == 10 and record.get('sparkle', {}).get('public_key_configured') is True,
+                smoke.get('signed') is True and record.get('sparkle', {}).get('public_key_configured') is True,
                 'explicit_unnotarized_development_package_required')
+        cross_compile = record.get('development_cross_compile', False)
+        require(type(cross_compile) is bool, 'invalid_development_cross_compile_mode')
+        if cross_compile:
+            native_tests = record.get('audio_plugin_native_tests', {})
+            components = record.get('components', [])
+            backend = [item for item in components if item.get('role') == 'backend']
+            require(platform == 'macos' and record.get('build_host_system') == 'Darwin' and
+                    record.get('build_host_architecture') == 'x86_64' and
+                    record.get('target_architecture') == 'arm64' and
+                    smoke.get('status') == 'not-run' and smoke.get('reason') == 'cross-compilation' and
+                    type(smoke.get('seconds')) is int and smoke['seconds'] == 0 and
+                    smoke.get('signing') == 'ad-hoc' and
+                    native_tests == {'status': 'not-run', 'reason': 'cross-compilation',
+                                     'tests': ['loopback', 'driver-identity']} and
+                    record.get('audio_plugin_install_permissions') == {'status': 'passed'} and
+                    components and all(item.get('architecture') == 'arm64' and
+                                       item.get('signature_verified') is True for item in components) and
+                    len(backend) == 1 and smoke.get('backend') == backend[0].get('path') and
+                    smoke.get('backend_sha256') == backend[0].get('sha256') and
+                    re.fullmatch('[0-9a-f]{64}', smoke.get('backend_sha256', '')) is not None,
+                    'explicit_development_cross_compile_record_required')
+        else:
+            require(smoke.get('status') == 'passed' and smoke.get('seconds') == 10,
+                    'signed_native_launch_smoke_required')
         suffixes = ['.dmg', '.zip']
     require(sorted(Path(a['name']).suffix for a in record['artifacts']) == suffixes,
             'unexpected_package_artifacts')

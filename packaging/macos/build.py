@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import platform
 import sys
 import plistlib
 import re
@@ -81,6 +82,8 @@ def main():
     p.add_argument('--signing-fingerprint', default=os.environ.get('MACOS_SIGNING_FINGERPRINT'))
     p.add_argument('--development-signing', action='store_true',
                    help='Explicitly produce an ad-hoc signed, unnotarized Mac development package')
+    p.add_argument('--development-cross-compile', action='store_true',
+                   help='Explicit Intel Mac to arm64 development build; native runtime checks are not run')
     p.add_argument('--team', choices=[I['macos']['team_id']], default=I['macos']['team_id'])
     p.add_argument('--notary-profile', default=os.environ.get('NOTARY_PROFILE'))
     p.add_argument('--notary-timeout', type=int, default=300)
@@ -89,6 +92,10 @@ def main():
     a = p.parse_args()
     if a.development_signing and (a.signing_fingerprint or a.notary_profile or a.notary_keychain):
         p.error('development signing cannot use a Developer ID identity or notary credentials')
+    if a.development_cross_compile and not (
+            a.arch == 'arm64' and a.development_signing and platform.system() == 'Darwin' and
+            platform.machine().lower() == 'x86_64'):
+        p.error('development cross-compilation requires an Intel Mac, --arch arm64 and --development-signing')
     native_arch = 'x86_64' if a.arch == 'x64' else 'arm64'
     if not re.fullmatch(r'[0-9a-f]{64}', a.source_tree_sha256) or not 1 <= a.build < 2**31:
         p.error('source tree SHA256 and positive build required')
@@ -209,7 +216,10 @@ def main():
         # Offline HAL tests load the bundle directly, without registering it
         # with CoreAudio or starting I/O. Installation is a separate user action.
         plugin_build = tmp / 'audio-plugin'
-        run('bash', ROOT / 'apps/audio-plugin/build.sh', plugin_build, a.source_tree_sha256, native_arch)
+        plugin_command = ['bash', ROOT / 'apps/audio-plugin/build.sh', plugin_build, a.source_tree_sha256, native_arch]
+        if a.development_cross_compile:
+            plugin_command += ['development-cross-compile']
+        run(*plugin_command)
         plugin_payload = resources / 'AudioPlugin'
         plugin_payload.mkdir()
         plugin = plugin_payload / 'OinkMicrophone.driver'
@@ -301,6 +311,13 @@ def main():
                       hardened_runtime=not a.development_signing,
                       notarization='see detached release record',
                       update_policy='sparkle' if trust['mac']['enabled'] else 'manual-only')
+        if a.development_cross_compile:
+            record.update(development_cross_compile=True, build_host_system='Darwin',
+                          build_host_architecture='x86_64', target_architecture='arm64')
+            record['launch_smoke'] = {'status': 'not-run', 'reason': 'cross-compilation', 'seconds': 0}
+            record['audio_plugin_native_tests'] = {'status': 'not-run', 'reason': 'cross-compilation',
+                                                   'tests': ['loopback', 'driver-identity']}
+            record['audio_plugin_install_permissions'] = {'status': 'passed'}
         record['sparkle'] = dict(included=bool(a.sparkle_cache), version=SPARKLE_VERSION if a.sparkle_cache else None,
                                 archive_sha256=SPARKLE_SHA256 if a.sparkle_cache else None,
                                 public_key_configured=bool(a.sparkle_public_key))
@@ -358,17 +375,18 @@ def main():
             # Exercise the shipping signature and loader (plus hardened runtime
             # on Developer ID builds). Private smoke state never contacts the user host.
             backend = mac / b['backend']
-            # LaunchServices discovers the nested appex when the host is launched,
-            # even though smoke disables File Provider work. Remove only this
-            # disposable bundle's registrations before another installation can
-            # choose it as its provider host; do this on smoke failures too.
-            with temporary_registrations(app, [
-                    (I['macos']['file_provider_bundle'], I['macos']['file_provider_id']),
-                    ('OinkFinderSync.appex', I['bundle_id'] + '.findersync')]):
-                launch_smoke(backend, seconds=10)
-            record['launch_smoke'] = {'status': 'passed', 'seconds': 10, 'signed': True,
-                                      'backend': backend.relative_to(app).as_posix(),
-                                      'backend_sha256': digest(backend)}
+            if not a.development_cross_compile:
+                # LaunchServices discovers the nested appex when the host is launched,
+                # even though smoke disables File Provider work. Remove only this
+                # disposable bundle's registrations before another installation can
+                # choose it as its provider host; do this on smoke failures too.
+                with temporary_registrations(app, [
+                        (I['macos']['file_provider_bundle'], I['macos']['file_provider_id']),
+                        ('OinkFinderSync.appex', I['bundle_id'] + '.findersync')]):
+                    launch_smoke(backend, seconds=10)
+                record['launch_smoke'] = {'status': 'passed', 'seconds': 10}
+            record['launch_smoke'].update(signed=True, backend=backend.relative_to(app).as_posix(),
+                                         backend_sha256=digest(backend))
             if a.development_signing:
                 record['launch_smoke']['signing'] = 'ad-hoc'
             app_notary = {'status': 'not-submitted'}

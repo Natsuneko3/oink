@@ -8,4 +8,6 @@ This custom release is built by GitHub Actions from the exact source commit asso
 
 The macOS applications use ad-hoc signatures and are not notarized by Apple. The Windows installer is not Authenticode signed.
 
+If the arm64 package metadata records `development_cross_compile: true`, that package was cross-compiled on an Intel Mac. Its native ARM launch smoke and HAL runtime tests were not run in CI; the metadata records `not-run` with reason `cross-compilation`. Architecture, package content, and code-signature checks still run. Native Intel Mac packages continue to require their runtime checks.
+
 The release also includes its source archive, package metadata, and SHA-256 checksums. Debug symbols remain separate GitHub Actions artifacts.
