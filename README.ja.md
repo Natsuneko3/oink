@@ -13,7 +13,7 @@ Oink は「Oink Is Not only a KVM」の略で、複数の Windows と Mac のあ
 
 ## インストール
 
-インストーラーと対応するソースコードは [GitHub Releases](https://github.com/oinkvm/oink/releases) から入手できます。
+インストーラーと対応するソースコードは [GitHub Releases](https://github.com/Natsuneko3/oink/releases) から入手できます。
 
 対応 OS とバージョン：
 

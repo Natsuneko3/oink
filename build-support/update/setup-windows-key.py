@@ -17,8 +17,8 @@ import sys
 CONFIG = Path(__file__).resolve().parents[2] / 'packaging/update-trust.json'
 SECRET = 'WINDOWS_UPDATE_ED25519_PEM_WIN_2026_01'
 ENVIRONMENT = 'release'
-KEYCHAIN_SERVICE = 'oink-windows-update'
-KEYCHAIN_ACCOUNT = 'Oink-win-2026-01'
+KEYCHAIN_SERVICE = 'oink-windows-update:Natsuneko3/oink'
+KEYCHAIN_ACCOUNT = 'Natsuneko3-oink-win-2026-01'
 
 
 class LoginKeychain:
@@ -86,6 +86,8 @@ def setup(config_path=CONFIG):
     if sys.platform != 'darwin' or os.environ.get('CI') or os.environ.get('GITHUB_ACTIONS'):
         raise ValueError('run_locally_on_key_owners_mac_outside_ci')
     config = json.loads(config_path.read_bytes())
+    if config['repository'] != 'Natsuneko3/oink':
+        raise ValueError('unexpected_update_repository')
     epoch = next(e for e in config['windows'] if e['epoch'] == 'win-2026-01')
     if epoch['public_key'] is not None or epoch['enabled']:
         raise ValueError('epoch_already_configured')

@@ -13,7 +13,7 @@ fn payload() -> Value {
         "generatedAt":"2026-10-14T00:00:00Z","expiresAt":"2026-11-13T00:00:00Z", "releases":[{
             "build":20,"version":"1.0.1","tag":"v1.0.1","sourceTreeSha256":"a".repeat(64),"architecture":"x86_64",
             "minimumWindowsBuild":17763,"protocolBaseline":1,"minimumUpdaterSchema":1,"severity":"normal","notes":{"zh-Hans":"修复问题。","en":"Fix a problem."},
-            "package":{"url":"https://github.com/oinkvm/oink/releases/download/v1.0.1/update.zip","length":3,
+            "package":{"url":"https://github.com/Natsuneko3/oink/releases/download/v1.0.1/update.zip","length":3,
             "sha256":"b".repeat(64),"keyId":WINDOWS_EPOCH,"ed25519":STANDARD.encode([0;64])}}]})
 }
 fn signed_bytes(bytes: &[u8]) -> Vec<u8> {
@@ -221,7 +221,7 @@ fn package_signatures_and_lengths_bind_final_bytes() {
     use sha2::{Digest, Sha256};
     let bytes = b"zip final bytes";
     let p = Package {
-        url: "https://bucket.account.r2.cloudflarestorage.com/Oink.msi?signature=abc".into(),
+        url: "https://github.com/Natsuneko3/oink/releases/download/v1.0.1/Oink.msi".into(),
         length: bytes.len() as u64,
         sha256: hex(&Sha256::digest(bytes)),
         key_id: WINDOWS_EPOCH.into(),
@@ -241,20 +241,50 @@ fn package_signatures_and_lengths_bind_final_bytes() {
     assert_eq!(verify_package(bytes, &oversize, &t), Err(Error::Metadata));
 }
 #[test]
-fn signed_packages_and_redirects_accept_any_https_host_without_credentials() {
+fn signed_packages_only_accept_this_forks_release_assets() {
     for url in [
-        "https://github.com/oinkvm/oink/releases/download/v1/a.zip",
-        "https://github.com/another/repository/releases/download/v2/a.msi",
-        "https://github.com/oinkvm/oink/releases/download/v0.3.2/Oink-0.3.2-93-windows-x64.msi",
-        "https://github.com/oinkvm/oink/releases/download/v0.3.3/Oink-0.3.3-windows-x64.msi",
-        "https://bucket.account.r2.cloudflarestorage.com/windows/Oink%201.0.msi?X-Amz-Signature=abc",
-        "https://downloads.example.test:9443/any/path?token=x#package",
-        "HTTPS://cdn.example.test/package.msi",
+        "https://github.com/Natsuneko3/oink/releases/download/v1/a.zip",
+        "https://github.com/Natsuneko3/oink/releases/download/v0.3.2/Oink-0.3.2-93-windows-x64.msi",
+        "https://github.com/Natsuneko3/oink/releases/download/v0.3.3+custom.1/Oink-0.3.3-windows-x64.msi",
     ] {
         assert_eq!(validate_package_url(url), Ok(()), "{url}");
         let mut manifest = payload();
         manifest["releases"][0]["package"]["url"] = url.into();
         assert!(check(&manifest, &Watermark::default(), NOW).is_ok(), "{url}");
+    }
+    for url in [
+        "https://github.com/oinkvm/oink/releases/download/v1/a.zip",
+        "https://github.com/another/repository/releases/download/v2/a.msi",
+        "https://github.com/Natsuneko3/oink-other/releases/download/v1/a.msi",
+        "https://github.com/Natsuneko3/oink/releases/latest/download/a.msi",
+        "https://github.com/Natsuneko3/oink/releases/download/v1/",
+        "https://github.com/Natsuneko3/oink/releases/download/v1/a.msi/extra",
+        "https://github.com/Natsuneko3/oink/releases/download/v1/a.msi?redirect=upstream",
+        "https://github.com/Natsuneko3/oink/releases/download/v1/a.msi#fragment",
+        "https://github.com/Natsuneko3/oink/releases/download/v1%2f..%2fupstream/a.msi",
+        "https://github.com:9443/Natsuneko3/oink/releases/download/v1/a.msi",
+        "https://github.com.evil.test/Natsuneko3/oink/releases/download/v1/a.msi",
+        "https://bucket.account.r2.cloudflarestorage.com/windows/Oink.msi",
+    ] {
+        assert_eq!(validate_package_url(url), Err(Error::Url), "{url}");
+        let mut manifest = payload();
+        manifest["releases"][0]["package"]["url"] = url.into();
+        assert_eq!(
+            check(&manifest, &Watermark::default(), NOW).unwrap_err(),
+            Error::Url,
+            "{url}"
+        );
+    }
+}
+#[test]
+fn release_asset_redirects_allow_https_cdn_without_credentials_or_downgrade() {
+    for url in [
+        "https://github.com/Natsuneko3/oink/releases/download/update-feed/windows-manifest.json",
+        "https://release-assets.githubusercontent.com/github-production-release-asset/123/asset?signature=abc",
+        "https://objects.githubusercontent.com/github-production-release-asset/123/asset",
+        "https://downloads.example.test:9443/any/path?token=x#package",
+        "HTTPS://cdn.example.test/package.msi",
+    ] {
         for hop in 0..=5 {
             assert_eq!(validate_redirect(url, hop), Ok(()), "{url}: {hop}");
         }
@@ -306,7 +336,7 @@ fn compiled_feed_origin_has_no_runtime_override_and_test_assets_stay_loopback() 
     {
         assert_eq!(
             manifest_url(),
-            "https://updates.oink.hachiwii.com/windows/v1/win-2026-01/stable/manifest.json"
+            "https://github.com/Natsuneko3/oink/releases/download/update-feed/windows-v1-win-2026-01-stable-manifest.json"
         );
         assert!(
             validate_package_url("http://127.0.0.1:8765/oink-update-qualification/packages/candidate.msi").is_err()

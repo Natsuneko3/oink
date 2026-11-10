@@ -95,9 +95,14 @@ class MacLocalizations(unittest.TestCase):
 class MacTccPolicy(unittest.TestCase):
     def test_production_bundles_forbid_local_network_and_other_ats_exceptions(self):
         C.verify_update_transport({})
-        C.verify_update_transport({'SUFeedURL':'https://updates.oink.hachiwii.com/mac/v1/mac-2026-01/stable/appcast.xml'})
+        for asset in ('mac-v1-mac-2026-01-stable-appcast.xml',
+                      'mac-v1-mac-2026-01-x64-stable-appcast.xml'):
+            C.verify_update_transport({'SUFeedURL':f'https://github.com/Natsuneko3/oink/releases/download/update-feed/{asset}'})
         for info in [{'NSAppTransportSecurity':{}}, {'NSAppTransportSecurity':{'NSAllowsLocalNetworking':True}},
-                     {'SUFeedURL':'http://127.0.0.1:9000/appcast.xml'}, {'SUFeedURL':'https://example.test/'}]:
+                     {'SUFeedURL':'http://127.0.0.1:9000/appcast.xml'}, {'SUFeedURL':'https://example.test/'},
+                     {'SUFeedURL':'https://updates.oink.hachiwii.com/mac/v1/mac-2026-01/stable/appcast.xml'},
+                     {'SUFeedURL':'https://github.com/oinkvm/oink/releases/download/update-feed/mac-v1-mac-2026-01-stable-appcast.xml'},
+                     {'SUFeedURL':'https://github.com/Natsuneko3/oink/releases/download/update-feed/anything.xml'}]:
             with self.subTest(info=info), self.assertRaises(RuntimeError):C.verify_update_transport(info)
 
     def test_audio_capture_requirements_belong_to_backend(self):

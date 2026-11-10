@@ -82,7 +82,7 @@ class FeedTests(unittest.TestCase):
             feeds[channel] = {'records': [], 'last_allocated': 1, 'manifest_sha256': feed.digest(raw), 'verified_at': feed.iso(NOW)}
         feed.write(self.state / 'registry.json', {'schema': 1, 'feeds': {EPOCH['epoch']: feeds}})
         feed.write(self.state / 'site/mac/appcast.xml', b'OFFLINE SIGNED BYTES\r\n')
-        return {'windows': [EPOCH], 'repository': 'oinkvm/oink'}
+        return {'windows': [EPOCH], 'repository': 'Natsuneko3/oink'}
 
     def test_exact_signature_expiry_and_identity(self):
         raw = self.envelope(self.payload())
@@ -189,14 +189,14 @@ class PublicationTests(FeedTests):
         feed.write(folder/'update.json', {'channel': 'beta', 'notes': {'en': 'Stale release asset'}})
         notes_path = self.state/'.github/update-notes.json'
         feed.write(notes_path, {'channel': 'stable', 'severity': 'normal', 'notes': {'zh-Hans': '测试更新', 'en': 'Test update'}})
-        config = {'windows': [EPOCH], 'repository': 'oinkvm/oink'}
-        context = {'GITHUB_ACTIONS': 'true', 'GITHUB_REPOSITORY': 'oinkvm/oink', 'GITHUB_RUN_ID': '12',
+        config = {'windows': [EPOCH], 'repository': 'Natsuneko3/oink'}
+        context = {'GITHUB_ACTIONS': 'true', 'GITHUB_REPOSITORY': 'Natsuneko3/oink', 'GITHUB_RUN_ID': '12',
                    'OINK_SOURCE_TREE_SHA256': 'a'*64, 'OINK_RELEASE_TAG': 'v1.0.0', 'OINK_SIGNPATH_APPROVAL_ID': 'TEST'}
         with patch.dict(os.environ, context), patch.object(feed, 'ROOT', self.state):
             release.sign_package(config, folder, self.state/'output.json')
             output = feed.read(self.state/'output.json')
             self.assertEqual(output['release']['package']['url'],
-                             'https://github.com/oinkvm/oink/releases/download/v1.0.0/Oink-1.0.0-windows-x64.msi')
+                             'https://github.com/Natsuneko3/oink/releases/download/v1.0.0/Oink-1.0.0-windows-x64.msi')
             self.assertEqual(output['release']['build'], 2)
             feed.write(self.state / 'registry.json', {'schema': 1, 'feeds': {EPOCH['epoch']: {
                 c: {'records': [], 'last_allocated': 0, 'manifest_sha256': None} for c in EPOCH['channels']}}})

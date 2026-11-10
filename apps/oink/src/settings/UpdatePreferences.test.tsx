@@ -121,7 +121,7 @@ it('keeps a manual download route for disabled versions',async()=>{
   mock.openUrl.mockResolvedValue(undefined);
   check({...status,phase:'disabled'});
   fireEvent.click(button());
-  await waitFor(()=>expect(mock.openUrl).toHaveBeenCalledWith('https://github.com/oinkvm/oink/releases'));
+  await waitFor(()=>expect(mock.openUrl).toHaveBeenCalledWith('https://github.com/Natsuneko3/oink/releases'));
   expect(mock.update).not.toHaveBeenCalled();
   expect(result()).toBe('');
 });

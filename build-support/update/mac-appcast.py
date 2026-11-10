@@ -89,7 +89,7 @@ def main():
     parser.add_argument('--tag', required=True)
     parser.add_argument('--notes', required=True, type=Path, help='JSON object with required zh-Hans and en plain text')
     parser.add_argument('--channel', choices=['stable', 'beta'], default='stable')
-    parser.add_argument('--account', default='Oink-mac-2026-01')
+    parser.add_argument('--account', default='Natsuneko3-oink-mac-2026-01')
     args = parser.parse_args()
     notes = feed.validate_notes(feed.read(args.notes))
     config = json.loads((ROOT / 'packaging/update-trust.json').read_bytes())

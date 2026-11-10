@@ -8,10 +8,20 @@ import feed
 import readback
 
 class ReadbackTests(unittest.TestCase):
+    def test_nested_feed_reads_exact_fork_release_asset_with_https_redirects(self):
+        path = 'windows/v1/win-2026-01/stable/manifest.json'
+        url = 'https://github.com/Natsuneko3/oink/releases/download/update-feed/windows-v1-win-2026-01-stable-manifest.json'
+        def fetch(actual, limit, redirects, revalidate, headers):
+            self.assertEqual(actual, url)
+            self.assertTrue(redirects, 'GitHub redirects public Release assets to its HTTPS CDN')
+            return b'signed manifest'
+        with patch.object(feed, 'download', side_effect=fetch), patch.object(readback, 'log'):
+            readback.verify({path: b'signed manifest'}, {path: None})
+
     def run_case(self, responses, expected=None, previous=None):
         clock=[0.0];seen=[]
         def fetch(url,limit,redirects,revalidate,headers):
-            self.assertFalse(redirects);self.assertTrue(revalidate)
+            self.assertTrue(redirects);self.assertTrue(revalidate)
             seen.append(url);headers.update({'Cache-Control':'max-age=600','Age':'0','X-Cache':'HIT','ETag':'old'})
             return responses(url,clock[0])
         with patch.object(feed,'download',side_effect=fetch),patch.object(readback.time,'monotonic',side_effect=lambda:clock[0]),patch.object(readback.time,'sleep',side_effect=lambda seconds:clock.__setitem__(0,clock[0]+seconds)),patch.object(readback,'log'):
@@ -105,14 +115,14 @@ class ReadbackTests(unittest.TestCase):
     def test_intel_channels_require_canonical_convergence_in_same_round(self):
         paths = [f'mac/v1/mac-2026-01/x64/{channel}/appcast.xml' for channel in ('stable', 'beta')]
         def responses(url, t):
-            if '?' not in url and t < (5 if '/stable/' in url else 10):
+            if '?' not in url and t < (5 if '-stable-' in url else 10):
                 return b'old Intel feed'
             return b'new Intel feed'
         elapsed, seen = self.run_case(responses, dict.fromkeys(paths, b'new Intel feed'),
                                       dict.fromkeys(paths, b'old Intel feed'))
         self.assertEqual(elapsed, 10)
         for path in paths:
-            self.assertEqual(seen.count(feed.BASE + path), 3)
+            self.assertEqual(seen.count(feed.public_url(path)), 3)
 
     def test_first_intel_publication_can_converge_from_known_absence(self):
         import urllib.error
@@ -123,6 +133,6 @@ class ReadbackTests(unittest.TestCase):
             return b'new Intel feed'
         elapsed, seen = self.run_case(responses, {path: b'new Intel feed'}, {path: None})
         self.assertEqual(elapsed, 5)
-        self.assertEqual(seen.count(feed.BASE + path), 2)
+        self.assertEqual(seen.count(feed.public_url(path)), 2)
 
 if __name__=='__main__':unittest.main()

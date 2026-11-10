@@ -47,29 +47,15 @@ class PublishedFeedContract(unittest.TestCase):
             self.assertIn('needs: published', job)
             self.assertIn("if: inputs.platform != '" + excluded + "'", job)
 
-    def test_platform_deployments_do_not_collide_in_same_run_artifacts(self):
+    def test_deployment_publishes_merged_release_assets_and_rolls_back_frozen_parent(self):
         workflow = (ROOT / '.github/workflows/deploy-feed.yml').read_text()
         self.assertIn("github.event_name != 'release'", workflow)
         self.assertNotIn("github.event_name == 'workflow_dispatch'", workflow)
-        for prefix in ('previous-feed', 'next-feed'):
-            self.assertIn('name: ' + prefix + '-${{ inputs.platform }}', workflow)
-            self.assertIn('artifact_name: ' + prefix + '-${{ inputs.platform }}', workflow)
-
-    def test_every_publisher_caller_forwards_required_environment_key(self):
-        for platform, key in [('macos', 'SPARKLE_ED25519_PRIVATE_KEY'),
-                              ('windows', 'WINDOWS_UPDATE_ED25519_PEM_WIN_2026_01')]:
-            target = f'publish-{platform}-feed.yml'
-            reusable = (ROOT / '.github/workflows' / target).read_text()
-            declaration = re.search(r'^      ' + key + r':\n((?:        .*\n)+)', reusable, re.M)
-            self.assertIsNotNone(declaration)
-            self.assertIn('required: true', declaration[1])
-            callers = []
-            for path in (ROOT / '.github/workflows').glob('*.yml'):
-                for job in re.split(r'(?=^  [A-Za-z0-9_-]+:\n)', path.read_text(), flags=re.M):
-                    if f'uses: ./.github/workflows/{target}' in job:
-                        callers.append(path.name)
-                        self.assertIn(key + ': ${{ secrets.' + key + ' }}', job, path.name)
-            self.assertEqual(callers, ['seed-update-feeds.yml'])
+        self.assertIn('release_assets.py publish --state next-state', workflow)
+        self.assertIn('release_assets.py rollback --state feed-state', workflow)
+        self.assertIn('deploy.py prepare', workflow)
+        self.assertIn('deploy.py commit', workflow)
+        self.assertIn('deploy.py verify-rollback', workflow)
 
     def test_empty_environment_keys_fail_before_invoking_crypto(self):
         with patch.dict(os.environ, {mac_release.SECRET: ''}), patch.object(mac_release, 'command') as command:
@@ -92,7 +78,7 @@ class PublishedReleaseGuard(unittest.TestCase):
         self.path = Path(temporary.name) / 'event.json'
         self.live = dict(id=7, tag_name='v0.1.1', draft=False, prerelease=False, published_at='2026-10-20T20:04:19Z')
         self.event = dict(repository=dict(default_branch='main'), inputs=dict(release_tag='v0.1.1'))
-        environment = patch.dict(os.environ, dict(GITHUB_ACTIONS='true', GITHUB_REPOSITORY='oinkvm/oink',
+        environment = patch.dict(os.environ, dict(GITHUB_ACTIONS='true', GITHUB_REPOSITORY='Natsuneko3/oink',
             GITHUB_EVENT_NAME='workflow_dispatch', GITHUB_REF='refs/heads/main', GITHUB_EVENT_PATH=str(self.path)))
         environment.start()
         self.addCleanup(environment.stop)
@@ -109,6 +95,13 @@ class PublishedReleaseGuard(unittest.TestCase):
             with self.subTest(field=field), self.assertRaisesRegex(ValueError, 'release_not_public'):
                 self.verify()
             self.live[field] = original
+
+    def test_fork_publication_queries_only_its_own_release(self):
+        self.path.write_text(json.dumps(self.event))
+        def request(path):
+            self.assertEqual(path, 'repos/Natsuneko3/oink/releases/tags/v0.1.1')
+            return copy.deepcopy(self.live)
+        self.assertEqual(self.module.published('v0.1.1', request=request), self.live)
 
     def test_dispatch_rejects_other_refs_repositories_events_and_tag_inputs(self):
         for field, value in [('GITHUB_REF', 'refs/tags/v0.1.1'), ('GITHUB_REF', 'refs/heads/topic'),

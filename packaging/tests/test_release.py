@@ -94,6 +94,8 @@ class PublicRelease(unittest.TestCase):
             with patch.object(R.subprocess,'check_output',return_value=''),patch.object(R.subprocess,'run') as run:
                 R.publish(p,COMMIT,Path('notes.txt'));cmd=run.call_args.args[0]
                 self.assertIn('--draft',cmd);self.assertEqual(cmd[cmd.index('--target')+1],COMMIT)
+                self.assertIn('--repo', cmd)
+                self.assertEqual(cmd[cmd.index('--repo')+1], 'Natsuneko3/oink')
                 self.assertEqual(len(cmd[-4:]),4)
             with patch.object(R.subprocess,'check_output',return_value='c'*40+'\trefs/tags/v0.1.0\n'),patch.object(R.subprocess,'run') as run:
                 with self.assertRaisesRegex(ValueError,'different'):R.publish(p,COMMIT,Path('notes.txt'))

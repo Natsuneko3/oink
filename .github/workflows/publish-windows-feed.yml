@@ -5,18 +5,11 @@ on:
       release_tag:
         required: true
         type: string
-    secrets:
-      UPDATE_FEED_WRITER_TOKEN:
-        required: true
-      WINDOWS_UPDATE_ED25519_PEM_WIN_2026_01:
-        required: true
 permissions:
-  contents: read
-  pages: write
-  id-token: write
+  contents: write
 jobs:
   gate:
-    if: github.repository == 'oinkvm/oink' && github.event_name == 'workflow_dispatch' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    if: github.repository == 'Natsuneko3/oink' && github.event_name == 'workflow_dispatch' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     runs-on: ubuntu-latest
     outputs:
       enabled: ${{ steps.gate.outputs.enabled }}
@@ -73,7 +66,7 @@ jobs:
         with:
           ref: update-feed-state
           path: feed-state
-          token: ${{ secrets.UPDATE_FEED_WRITER_TOKEN }}
+          token: ${{ github.token }}
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: published-windows-update-input
@@ -107,5 +100,3 @@ jobs:
     with:
       platform: windows
       artifact: verified-windows-feed
-    secrets:
-      UPDATE_FEED_WRITER_TOKEN: ${{ secrets.UPDATE_FEED_WRITER_TOKEN }}

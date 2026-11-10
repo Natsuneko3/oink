@@ -33,12 +33,18 @@ def main():
                    help='Portable source modes for an archive without a Git index')
     p.add_argument('--tool-cache', type=Path, default=Path.home() / '.cache/oink-build')
     p.add_argument('--signing-fingerprint', default=os.environ.get('MACOS_SIGNING_FINGERPRINT'), help='Optional SHA1 of an existing Developer ID certificate')
+    p.add_argument('--development-signing', action='store_true',
+                   help='Mac development distribution: ad-hoc signing, without Developer ID or notarization')
     p.add_argument('--notary-profile', default=os.environ.get('NOTARY_PROFILE'))
     p.add_argument('--notary-keychain', type=Path)
     p.add_argument('--notary-timeout', type=int, default=300)
     p.add_argument('--windows-update-test-fail-health', action='store_true', help='TEST ONLY: withhold candidate health proof for rollback qualification')
     p.add_argument('--run-native-tests', action='store_true', help='Run Windows C++/PowerShell tests explicitly')
     a = p.parse_args()
+    if a.development_signing and a.platform != 'macos':
+        p.error('development signing is only available for Mac packages')
+    if a.development_signing and (a.signing_fingerprint or a.notary_profile or a.notary_keychain):
+        p.error('development signing cannot use a Developer ID identity or notary credentials')
     if a.windows_update_test_fail_health and not a.windows_update_test_feed:
         p.error('test health failure requires a test feed')
     from update_qualification import origin as test_origin
@@ -84,7 +90,7 @@ def main():
     (output / 'build-environment.json').write_text(json.dumps({**tools, 'version': version, 'source_commit': commit}, indent=2) + '\n')
     snapshot.write_text(json.dumps({'schema': 1, 'source_tree_sha256': tree, 'files': inventory}, indent=2) + '\n')
     macos = a.platform == 'macos'
-    if macos:
+    if macos and not a.development_signing:
         sys.path.insert(0, str(ROOT / 'packaging/macos'))
         from signing import select_identity
         a.signing_fingerprint = select_identity('893V37X2CW', a.signing_fingerprint)
@@ -106,6 +112,8 @@ def main():
                '--binaries', str(binaries), '--output', str(output), '--update-notes-file', str(notes_file), *common]
     if macos:
         command += ['--arch', a.arch, '--sparkle-cache', str(a.tool_cache), '--notary-timeout', str(a.notary_timeout)]
+        if a.development_signing:
+            command += ['--development-signing']
         for flag, value in [('--signing-fingerprint', a.signing_fingerprint),
                             ('--notary-profile', a.notary_profile), ('--notary-keychain', a.notary_keychain)]:
             if value:

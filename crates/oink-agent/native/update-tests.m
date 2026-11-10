@@ -61,9 +61,9 @@ int main(void) {
         OinkUpdateDriver *stableDriver=[OinkUpdateDriver new];
         SPUUpdater *stableUpdater=(SPUUpdater *)[TestUpdater new];
         #if defined(__x86_64__)
-        assert([[stableDriver feedURLStringForUpdater:stableUpdater] isEqualToString:@"https://updates.oink.hachiwii.com/mac/v1/mac-2026-01/x64/stable/appcast.xml"]);
+        assert([[stableDriver feedURLStringForUpdater:stableUpdater] isEqualToString:@"https://github.com/Natsuneko3/oink/releases/download/update-feed/mac-v1-mac-2026-01-x64-stable-appcast.xml"]);
         #else
-        assert([[stableDriver feedURLStringForUpdater:stableUpdater] isEqualToString:@"https://updates.oink.hachiwii.com/mac/v1/mac-2026-01/stable/appcast.xml"]);
+        assert([[stableDriver feedURLStringForUpdater:stableUpdater] isEqualToString:@"https://github.com/Natsuneko3/oink/releases/download/update-feed/mac-v1-mac-2026-01-stable-appcast.xml"]);
         #endif
         assert([stableDriver allowedChannelsForUpdater:stableUpdater].count==0);
         // Sparkle wraps URLSession failures in SUDownloadError before showing
@@ -90,7 +90,7 @@ int main(void) {
         NSDictionary *notes=@{@"zh-Hans":@"修复问题。",@"en":@"Fix a problem.",@"ja":@"テスト",@"ko":@"테스트",@"es-MX":@"Prueba"};
         NSString *json=[[NSString alloc] initWithData:[NSJSONSerialization dataWithJSONObject:notes options:0 error:NULL] encoding:NSUTF8StringEncoding];
         NSMutableDictionary *properties=[@{@"sparkle:version":@"2",@"sparkle:shortVersionString":@"1.0.1",
-            @"enclosure":@{@"url":@"https://example.test/update.dmg",@"length":@"2"},
+            @"enclosure":@{@"url":@"https://github.com/Natsuneko3/oink/releases/download/v1.0.1/Oink.dmg",@"length":@"2"},
             @"description":@{@"content":@"Only one locale chosen by Sparkle",@"format":@"plain-text"},
             @"oink:releaseNotes":json} mutableCopy];
 #pragma clang diagnostic push
@@ -98,6 +98,37 @@ int main(void) {
         SUAppcastItem *item=[[SUAppcastItem alloc] initWithDictionary:properties];
 #pragma clang diagnostic pop
         assert(item);
+        // Even a valid/cached feed candidate cannot replace this fork with an
+        // upstream package, another repository, or an ambiguous release URL.
+        for (NSString *url in @[
+            @"https://github.com/oinkvm/oink/releases/download/v1.0.1/Oink.dmg",
+            @"https://github.com/another/oink/releases/download/v1.0.1/Oink.dmg",
+            @"https://github.com/Natsuneko3/oink-other/releases/download/v1.0.1/Oink.dmg",
+            @"https://github.com/Natsuneko3/oink/releases/latest/download/Oink.dmg",
+            @"https://github.com/Natsuneko3/oink/releases/download/v1.0.1/Oink.dmg/extra",
+            @"https://github.com/Natsuneko3/oink/releases/download/v1.0.1/Oink.dmg?redirect=upstream",
+            @"https://github.com/Natsuneko3/oink/releases/download/v1.0.1/Oink.dmg#fragment",
+            @"https://github.com/Natsuneko3/oink/releases/download/v1%2f..%2fupstream/Oink.dmg",
+            @"https://github.com:9443/Natsuneko3/oink/releases/download/v1.0.1/Oink.dmg",
+            @"http://github.com/Natsuneko3/oink/releases/download/v1.0.1/Oink.dmg",
+            @"https://user@github.com/Natsuneko3/oink/releases/download/v1.0.1/Oink.dmg",
+            @"https://github.com.evil.test/Natsuneko3/oink/releases/download/v1.0.1/Oink.dmg"
+        ]) {
+            NSMutableDictionary *blockedProperties=[properties mutableCopy];
+            blockedProperties[@"enclosure"]=@{@"url":url,@"length":@"2"};
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+            SUAppcastItem *blocked=[[SUAppcastItem alloc] initWithDictionary:blockedProperties];
+#pragma clang diagnostic pop
+            assert(blocked);
+            for (id state in @[[TestUpdateState new],[CachedUpdateState new]]) {
+                OinkUpdateDriver *isolated=[OinkUpdateDriver new];isolated.callback=captureCandidate;
+                candidateNotes=nil;__block int blockedReply=-1;
+                [isolated showUpdateFoundWithAppcastItem:blocked state:state reply:^(SPUUserUpdateChoice choice) {blockedReply=(int)choice;}];
+                assert(blockedReply==SPUUserUpdateChoiceDismiss);
+                assert(candidateNotes==nil && isolated.found==nil && isolated.ready==nil && !isolated.armed);
+            }
+        }
         // A local replacement can leave Sparkle's cached candidate at the
         // running build. It must be dismissed before publishing availability.
         ReplacedUpdateDriver *replaced=[ReplacedUpdateDriver new];

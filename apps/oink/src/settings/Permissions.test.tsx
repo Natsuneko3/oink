@@ -304,7 +304,7 @@ describe('settings actions', () => {
     const open = vi.spyOn(shell, 'openUrl').mockResolvedValue();
     const { container } = render(view());
     fireEvent.click(container.querySelector('[data-item="version"] button')!);
-    await waitFor(() => expect(open).toHaveBeenCalledWith('https://github.com/oinkvm/oink/releases'));
+    await waitFor(() => expect(open).toHaveBeenCalledWith('https://github.com/Natsuneko3/oink/releases'));
     const input = container.querySelector('[data-item="logMaxMb"] input')!;
     expect(input.closest('.ok-input')?.textContent).toContain('MB');
     open.mockRestore();

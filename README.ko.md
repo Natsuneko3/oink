@@ -13,7 +13,7 @@ Oink는 "Oink Is Not only a KVM"의 약자로, 여러 대의 Windows와 Mac 사�
 
 ## 설치
 
-[GitHub Releases](https://github.com/oinkvm/oink/releases)에서 설치 파일과 해당 소스 코드를 받을 수 있습니다.
+[GitHub Releases](https://github.com/Natsuneko3/oink/releases)에서 설치 파일과 해당 소스 코드를 받을 수 있습니다.
 
 지원하는 운영체제와 버전:
 

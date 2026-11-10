@@ -25,7 +25,7 @@ class SetupTests(unittest.TestCase):
             output = Path(tmp) / 'state'
             feed_site.initialize(output)
             self.assertEqual(feed_site.state_info(output)['revision'], 0)
-            self.assertEqual(set(feed_site.files(output / 'site')), {'CNAME', 'index.html'})
+            self.assertEqual(set(feed_site.files(output / 'site')), {'index.html'})
             feed_site.verify_all(output)
             with self.assertRaises(FileExistsError): feed_site.initialize(output)
 
@@ -47,6 +47,7 @@ class SetupTests(unittest.TestCase):
                     if command[-1] == '-p': return subprocess.CompletedProcess(command, 0, PUBLIC.encode(), b'')
                     if command[:3] == ['gh', 'secret', 'set']:
                         self.assertEqual(kwargs['input'], SEED)
+                        self.assertEqual(command[command.index('--repo') + 1], 'Natsuneko3/oink')
                         self.assertEqual(config.read_bytes(), original)
                         return subprocess.CompletedProcess(command, 0 if succeeds else 1, b'', SEED)
                     return subprocess.CompletedProcess(command, 0, b'', b'')
@@ -66,6 +67,19 @@ class SetupTests(unittest.TestCase):
         with patch.dict(key.os.environ, {'CI': 'true'}), patch.object(key.subprocess, 'run') as run:
             with self.assertRaisesRegex(RuntimeError, 'outside CI'): key.setup(Path('unused'))
             run.assert_not_called()
+
+    def test_wrong_repository_stops_before_accessing_keychain_or_github(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / 'packaging').mkdir()
+            config = json.loads((ROOT / 'packaging/update-trust.json').read_bytes())
+            config['repository'] = 'oinkvm/oink'
+            (root / 'packaging/update-trust.json').write_text(json.dumps(config))
+            with patch.object(key, 'ROOT', root), patch.object(key.sys, 'platform', 'darwin'), \
+                    patch.dict(key.os.environ, {}, clear=True), patch.object(key.subprocess, 'run') as run:
+                with self.assertRaisesRegex(RuntimeError, 'unexpected update repository'):
+                    key.setup(root / 'tools')
+                run.assert_not_called()
 
 
 if __name__ == '__main__': unittest.main()

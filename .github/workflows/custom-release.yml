@@ -1,0 +1,191 @@
+name: Publish custom release
+
+on:
+  workflow_dispatch:
+    inputs:
+      build:
+        description: Reserved product build for this custom release
+        required: true
+        default: '114'
+        type: string
+      release_tag:
+        description: New tag for the custom release
+        required: true
+        default: v0.3.5-custom.1
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: custom-release-packages
+  cancel-in-progress: false
+
+env:
+  CARGO_INCREMENTAL: '0'
+  PYTHONUTF8: '1'
+  MACOSX_DEPLOYMENT_TARGET: '14.2'
+  CMAKE_POLICY_VERSION_MINIMUM: '3.5'
+
+jobs:
+  package:
+    if: github.event_name == 'workflow_dispatch' && github.repository == 'Natsuneko3/oink' && github.ref == 'refs/heads/main'
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            platform: macos
+            stage_platform: macos
+            arch: arm64
+            target: aarch64-apple-darwin
+            jobs: '2'
+          - os: macos-15-intel
+            platform: macos
+            stage_platform: macos-x64
+            arch: x64
+            target: x86_64-apple-darwin
+            jobs: '2'
+          - os: windows-2022
+            platform: windows
+            stage_platform: windows
+            arch: x64
+            target: x86_64-pc-windows-msvc
+            jobs: '4'
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    env:
+      CARGO_BUILD_JOBS: ${{ matrix.jobs }}
+      OINK_REPORT_DSN: ''
+      SENTRY_AUTH_TOKEN: ''
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f
+        with:
+          toolchain: '1.99.0'
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          key: custom-release-${{ matrix.target }}
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.14.6'
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: '24.14.1'
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4
+        with:
+          path: |
+            ~/.cargo/bin/cargo-about*
+            ${{ runner.temp }}/package-tools
+          key: custom-release-tools-${{ runner.os }}-${{ runner.arch }}-rust1.99.0-about0.9.2-wix5.0.2-sparkle2.9.6
+      - name: Pin build tools
+        shell: bash
+        run: |
+          if [[ "$RUNNER_OS" == macOS ]]; then test "$(uname -m)" = "${{ matrix.target == 'aarch64-apple-darwin' && 'arm64' || 'x86_64' }}"; fi
+          npm install --global npm@11.11.0
+          if ! cargo about --version 2>/dev/null | grep -q '0.9.2$'; then cargo install cargo-about --version 0.9.2 --locked --features cli; fi
+      - name: Build and stage custom packages
+        shell: bash
+        env:
+          BUILD: ${{ inputs.build }}
+          PLATFORM: ${{ matrix.platform }}
+          STAGE_PLATFORM: ${{ matrix.stage_platform }}
+        run: |
+          args=()
+          if [[ "$RUNNER_OS" == macOS ]]; then
+            args+=(--arch "${{ matrix.arch }}" --development-signing)
+          fi
+          python build-support/package.py --public-version --platform "$PLATFORM" --build "$BUILD" --output-root "$RUNNER_TEMP/packages" --tool-cache "$RUNNER_TEMP/package-tools" "${args[@]}"
+          python build-support/custom_release.py stage --packages "$RUNNER_TEMP/packages" --platform "$STAGE_PLATFORM" --build "$BUILD" --commit "$GITHUB_SHA" --output "$RUNNER_TEMP/distribution"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: custom-package-${{ matrix.stage_platform }}-${{ inputs.build }}
+          path: ${{ runner.temp }}/distribution/*
+          if-no-files-found: error
+      - name: Preserve debug symbols separately
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: custom-symbols-${{ matrix.stage_platform }}-${{ inputs.build }}
+          path: ${{ runner.temp }}/packages/**/symbols.noindex/**
+          include-hidden-files: true
+          if-no-files-found: error
+
+  publish:
+    needs: package
+    if: github.event_name == 'workflow_dispatch' && github.repository == 'Natsuneko3/oink' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    environment: release
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.14.6'
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: custom-package-*-${{ inputs.build }}
+          path: ${{ runner.temp }}/downloaded
+      - name: Assemble matching assets and publish latest release
+        env:
+          BUILD: ${{ inputs.build }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python build-support/custom_release.py assemble --downloads "$RUNNER_TEMP/downloaded" --build "$BUILD" --commit "$GITHUB_SHA" --output "$RUNNER_TEMP/release"
+          python build-support/custom_release.py publish --output "$RUNNER_TEMP/release" --tag "$RELEASE_TAG" --notes .github/custom-release-notes.md
+
+  update-feed:
+    needs: publish
+    if: github.event_name == 'workflow_dispatch' && github.repository == 'Natsuneko3/oink' && github.ref == 'refs/heads/main'
+    runs-on: macos-15
+    environment: release
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    concurrency:
+      group: oink-update-feed-publish
+      cancel-in-progress: false
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SPARKLE_ED25519_PRIVATE_KEY: ${{ secrets.SPARKLE_ED25519_PRIVATE_KEY }}
+      WINDOWS_UPDATE_ED25519_PEM_WIN_2026_01: ${{ secrets.WINDOWS_UPDATE_ED25519_PEM_WIN_2026_01 }}
+      RELEASE_TAG: ${{ inputs.release_tag }}
+      OINK_FEED_LOCK: oink-update-feed-publish
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: update-feed-state
+          path: feed-state
+          token: ${{ github.token }}
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.14.6'
+      - name: Select OpenSSL 3
+        run: |
+          echo "$(brew --prefix openssl@3)/bin" >> "$GITHUB_PATH"
+          "$(brew --prefix openssl@3)/bin/openssl" version | grep '^OpenSSL 3\.'
+      - name: Sign and publish custom update feeds
+        id: feeds
+        run: python3 build-support/update/custom_feed.py --release-tag "$RELEASE_TAG" --tool-cache "$RUNNER_TEMP/sparkle"
+      - name: Recover hosted feed snapshot after interruption
+        if: ${{ always() && steps.feeds.outcome != 'success' }}
+        run: python3 build-support/update/custom_feed.py --recover

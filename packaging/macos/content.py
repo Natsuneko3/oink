@@ -11,7 +11,7 @@ from macos_imports import verify_imports
 from versioning import release_version, macos_version_fields
 
 
-def verify_microphone(app, source_tree_sha256, team_id):
+def verify_microphone(app, source_tree_sha256, team_id, *, development_signing=False):
     plugin = app / 'Contents/Resources/AudioPlugin/OinkMicrophone.driver'
     plugin_info = plistlib.loads((plugin / 'Contents/Info.plist').read_bytes())
     if (plugin_info.get('CFBundleIdentifier') != 'com.hachiwii.oink.microphone.driver'
@@ -19,7 +19,10 @@ def verify_microphone(app, source_tree_sha256, team_id):
             or plugin_info.get('OinkGitSHA') != source_tree_sha256
             or not re.fullmatch(r'[a-f0-9]{64}', plugin_info.get('OinkPluginVersion', ''))):
         raise RuntimeError('Virtual microphone identity/provenance mismatch')
-    verify_signature(plugin, team_id)
+    if development_signing:
+        verify_signature(plugin, None, development_signing=True)
+    else:
+        verify_signature(plugin, team_id)
     if not (app / 'Contents/Resources/AudioPlugin/install.sh').is_file():
         raise RuntimeError('Virtual microphone installer missing')
 
@@ -40,7 +43,11 @@ def verify_update_transport(info):
     # Never ship a production app capable of relaxing URLSession's TLS policy.
     if 'NSAppTransportSecurity' in info:
         raise RuntimeError('ATS exceptions are forbidden in production Mac packages')
-    if 'SUFeedURL' in info and not info['SUFeedURL'].startswith('https://updates.oink.hachiwii.com/'):
+    feeds = {
+        'https://github.com/Natsuneko3/oink/releases/download/update-feed/mac-v1-mac-2026-01-stable-appcast.xml',
+        'https://github.com/Natsuneko3/oink/releases/download/update-feed/mac-v1-mac-2026-01-x64-stable-appcast.xml',
+    }
+    if 'SUFeedURL' in info and info['SUFeedURL'] not in feeds:
         raise RuntimeError('Unexpected Sparkle feed URL in production Mac package')
 
 
@@ -78,7 +85,7 @@ def verify_manager_signing_identity(details, backend_id):
         raise RuntimeError('File Provider manager must not share backend Keychain signing identity')
 
 
-def verify_app(app, identity, architecture='arm64'):
+def verify_app(app, identity, architecture='arm64', *, development_signing=False):
     verify_imports([app], identity['macos_minimum'])
     if any(app.rglob('*.dSYM')) or any(app.rglob('*.pdb')) or any(app.rglob('*.map')):
         raise RuntimeError('Private symbols must not be embedded in the Mac app')
@@ -145,6 +152,11 @@ def verify_app(app, identity, architecture='arm64'):
         role = 'backend' if bundle == app else 'ui' if bundle == helper else 'finder_sync' if bundle == finder else 'paste_helper' if bundle == paste else 'file_provider_extension'
         verify_component_groups(role, entitlements, group)
     metadata = json.loads((app / 'Contents/Resources' / identity['metadata_file']).read_text())
+    if development_signing:
+        if metadata.get('signing') != 'ad-hoc' or metadata.get('development_signing') is not True:
+            raise RuntimeError('Mac development package must explicitly record ad-hoc signing')
+    elif metadata.get('signing') == 'ad-hoc' or metadata.get('development_signing'):
+        raise RuntimeError('Development package cannot use the Developer ID verification path')
     from provenance import ROOT
     trust = json.loads((ROOT / 'packaging/update-trust.json').read_bytes())['mac']
     expected_policy = 'sparkle' if trust['enabled'] else 'manual-only'
@@ -169,6 +181,10 @@ def verify_app(app, identity, architecture='arm64'):
         raise RuntimeError('Mac crash report manifest differs from shipped images')
     if not (app / 'Contents/Frameworks/Sparkle.framework').is_dir():
         raise RuntimeError('Sparkle.framework missing')
-    verify_microphone(app, metadata['source_tree_sha256'], mac['team_id'])
-    verify_signature(app, mac['team_id'])
+    if development_signing:
+        verify_microphone(app, metadata['source_tree_sha256'], None, development_signing=True)
+        verify_signature(app, None, development_signing=True)
+    else:
+        verify_microphone(app, metadata['source_tree_sha256'], mac['team_id'])
+        verify_signature(app, mac['team_id'])
     return components

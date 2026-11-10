@@ -20,11 +20,24 @@ import unicodedata
 import urllib.request
 
 ROOT = Path(__file__).resolve().parents[2]
-BASE = 'https://updates.oink.hachiwii.com/'
+REPOSITORY = 'Natsuneko3/oink'
+FEED_TAG = 'update-feed'
+BASE = f'https://github.com/{REPOSITORY}/releases/download/{FEED_TAG}/'
 MAX_FEED = 1024 * 1024
 MAX_PACKAGE = 512 * 1024 * 1024
 MAX_NOTES = 16 * 1024
 KEY_ENV = {'win-2026-01': 'WINDOWS_UPDATE_ED25519_PEM_WIN_2026_01'}
+
+
+def asset_name(path):
+    """Map the existing signed snapshot layout to GitHub's flat asset names."""
+    require(isinstance(path, str) and all(re.fullmatch(r'[A-Za-z0-9_.-]+', part) and
+            part not in ('.', '..') for part in path.split('/')), 'feed_path')
+    return path.replace('/', '-')
+
+
+def public_url(path):
+    return BASE + asset_name(path)
 
 
 def require(ok, code):
@@ -176,7 +189,7 @@ class NoRedirects(urllib.request.HTTPRedirectHandler):
 
 def trust(platform='windows'):
     config = read(ROOT / 'packaging/update-trust.json')
-    require(config['schema'] == 1 and config['repository'] == 'oinkvm/oink', 'trust_schema')
+    require(config['schema'] == 1 and config['repository'] == REPOSITORY, 'trust_schema')
     if platform == 'windows':
         require(config['windows'], 'platform_state')
         for epoch in config['windows']:
@@ -322,7 +335,7 @@ def verify_site(state, config, public=False):
         for channel in epoch['channels']:
             slot = reg['feeds'][epoch['epoch']][channel]
             path = relative(epoch['epoch'], channel)
-            raw = download(BASE + path, MAX_FEED) if public else (state / 'site' / path).read_bytes()
+            raw = download(public_url(path), MAX_FEED, True) if public else (state / 'site' / path).read_bytes()
             require(digest(raw) == slot['manifest_sha256'], 'deployment_digest')
             obj = manifest(raw, epoch, channel)
             require(obj['sequence'] <= slot['last_allocated'], 'deployment_sequence')
@@ -351,7 +364,7 @@ def monitor(config, seen_path):
     for epoch in config['windows']:
         for channel in epoch['channels']:
             path = relative(epoch['epoch'], channel)
-            raw = download(BASE + path, MAX_FEED)
+            raw = download(public_url(path), MAX_FEED, True)
             obj = manifest(raw, epoch, channel, True, now)
             previous = seen.get(path, {'sequence': 0, 'hash': ''})
             require(obj['sequence'] >= previous['sequence'] and
@@ -366,7 +379,7 @@ def monitor(config, seen_path):
 
 
 def read_public_heartbeat():
-    return loads(download(BASE + 'heartbeat.json', MAX_FEED))
+    return loads(download(public_url('heartbeat.json'), MAX_FEED, True))
 
 
 def main():

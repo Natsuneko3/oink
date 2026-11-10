@@ -13,7 +13,7 @@ Oink 是 Oink Is Not only a KVM 的缩写，是一款在多台 Windows 和 Mac �
 
 ## 安装
 
-从 [GitHub Releases](https://github.com/oinkvm/oink/releases) 下载安装包和对应的源码。
+从 [GitHub Releases](https://github.com/Natsuneko3/oink/releases) 下载安装包和对应的源码。
 
 支持的操作系统和版本：
 

@@ -79,12 +79,16 @@ def main():
     p.add_argument('--build', type=int, required=True)
     p.add_argument('--source-tree-sha256', required=True)
     p.add_argument('--signing-fingerprint', default=os.environ.get('MACOS_SIGNING_FINGERPRINT'))
+    p.add_argument('--development-signing', action='store_true',
+                   help='Explicitly produce an ad-hoc signed, unnotarized Mac development package')
     p.add_argument('--team', choices=[I['macos']['team_id']], default=I['macos']['team_id'])
     p.add_argument('--notary-profile', default=os.environ.get('NOTARY_PROFILE'))
     p.add_argument('--notary-timeout', type=int, default=300)
     p.add_argument('--notary-keychain', type=Path, help='Optional non-default keychain containing the notary profile')
     p.add_argument('--sparkle-cache', type=Path)
     a = p.parse_args()
+    if a.development_signing and (a.signing_fingerprint or a.notary_profile or a.notary_keychain):
+        p.error('development signing cannot use a Developer ID identity or notary credentials')
     native_arch = 'x86_64' if a.arch == 'x64' else 'arm64'
     if not re.fullmatch(r'[0-9a-f]{64}', a.source_tree_sha256) or not 1 <= a.build < 2**31:
         p.error('source tree SHA256 and positive build required')
@@ -98,7 +102,7 @@ def main():
     if trust['mac']['enabled'] and not trust['mac']['public_key']:
         p.error('enabled Mac updates require the compiled Sparkle public key')
     a.sparkle_public_key = trust['mac']['public_key']
-    a.identity = select_identity(a.team, a.signing_fingerprint)
+    a.identity = '-' if a.development_signing else select_identity(a.team, a.signing_fingerprint)
     provenance = verify(a.binaries, a.source_tree_sha256, a.version, ('aarch64-apple-darwin' if a.arch == 'arm64' else 'x86_64-apple-darwin'), a.build, a.source_commit)
     if not a.sparkle_cache:
         p.error('the Mac package requires Sparkle.framework')
@@ -292,7 +296,10 @@ def main():
                                                          'images': symbol_records}, indent=2) + '\n')
         record = dict(schema=1, product=I['name'], version=a.version, source_commit=a.source_commit, build=a.build, provenance='source-tree', source_tree_sha256=a.source_tree_sha256,
                       architecture=a.arch, minimum_os=I['macos_minimum'], protocol_baseline=1,
-                      signing='developer-id', notarization='see detached release record',
+                      signing='ad-hoc' if a.development_signing else 'developer-id',
+                      development_signing=a.development_signing,
+                      hardened_runtime=not a.development_signing,
+                      notarization='see detached release record',
                       update_policy='sparkle' if trust['mac']['enabled'] else 'manual-only')
         record['sparkle'] = dict(included=bool(a.sparkle_cache), version=SPARKLE_VERSION if a.sparkle_cache else None,
                                 archive_sha256=SPARKLE_SHA256 if a.sparkle_cache else None,
@@ -304,8 +311,10 @@ def main():
         verify_imports([app], I['macos_minimum'])
 
         with awake_for_signing():
+            timestamp = '--timestamp=none' if a.development_signing else '--timestamp'
+            runtime = [] if a.development_signing else ['--options', 'runtime']
             def sign(path, identifier, entitlements=None):
-                args = ['codesign', '--force', '--options', 'runtime', '--timestamp', '--sign', a.identity, '--identifier', identifier]
+                args = ['codesign', '--force', *runtime, timestamp, '--sign', a.identity, '--identifier', identifier]
                 if entitlements:
                     args += ['--entitlements', str(entitlements)]
                 private_run(*args, path)
@@ -325,9 +334,9 @@ def main():
                             shutil.copymode(path, thinned)
                             shutil.move(thinned, path)
                     if executable or bundle:
-                        private_run('codesign', '--force', '--options', 'runtime', '--timestamp', '--sign', a.identity,
+                        private_run('codesign', '--force', *runtime, timestamp, '--sign', a.identity,
                             '--preserve-metadata=identifier,entitlements', path)
-                private_run('codesign', '--force', '--options', 'runtime', '--timestamp', '--sign', a.identity,
+                private_run('codesign', '--force', *runtime, timestamp, '--sign', a.identity,
                     '--preserve-metadata=identifier,entitlements', framework)
             sign(plugin, 'com.hachiwii.oink.microphone.driver')
             sign(finder, I['bundle_id'] + '.findersync', tmp / 'finder.plist')
@@ -341,10 +350,13 @@ def main():
             sign(mac / b['crash_collector'], I['bundle_id'] + '.crash-collector')
             sign(app, I['bundle_id'], tmp / 'host.plist')
             from content import verify_app
-            record['components'] = verify_app(app, I, native_arch)
+            if a.development_signing:
+                record['components'] = verify_app(app, I, native_arch, development_signing=True)
+            else:
+                record['components'] = verify_app(app, I, native_arch)
             run('node', ROOT / 'build-support/check-package-licenses.mjs', app, 'macos-' + a.arch, cwd=ROOT)
-            # Exercise the shipping signature, hardened runtime and embedded loader
-            # before notarization. Private smoke state never contacts the user host.
+            # Exercise the shipping signature and loader (plus hardened runtime
+            # on Developer ID builds). Private smoke state never contacts the user host.
             backend = mac / b['backend']
             # LaunchServices discovers the nested appex when the host is launched,
             # even though smoke disables File Provider work. Remove only this
@@ -357,6 +369,8 @@ def main():
             record['launch_smoke'] = {'status': 'passed', 'seconds': 10, 'signed': True,
                                       'backend': backend.relative_to(app).as_posix(),
                                       'backend_sha256': digest(backend)}
+            if a.development_signing:
+                record['launch_smoke']['signing'] = 'ad-hoc'
             app_notary = {'status': 'not-submitted'}
             if a.notary_profile:
                 submission = tmp / 'submission.zip'
@@ -370,15 +384,17 @@ def main():
             dmg = a.output / f'{stem}.dmg'
             from dmg import create
             create(app, dmg, a.sparkle_cache)
-            private_run('codesign', '--force', '--timestamp', '--sign', a.identity, dmg)
+            private_run('codesign', '--force', timestamp, '--sign', a.identity, dmg)
             private_run('codesign', '--verify', '--strict', dmg)
             dmg_notary = notarize(dmg, a.notary_profile, a.notary_keychain, a.notary_timeout)
             archive = a.output / f'{stem}.zip'
             run('ditto', '-c', '-k', '--sequesterRsrc', '--keepParent', app, archive)
             record['notarization'] = {'app': app_notary, 'dmg': dmg_notary}
             record['notarized'] = app_notary.get('stapled', False) and dmg_notary.get('stapled', False)
-            record['team_id'] = a.team
-            record['certificate_sha1'] = a.identity
+            record['team_id'] = None if a.development_signing else a.team
+            record['certificate_sha1'] = None if a.development_signing else a.identity
+            if a.development_signing:
+                record['app_group_namespace'] = a.team
             record['artifacts'] = [{'name': f.name, 'size': f.stat().st_size,
                                     'sha256': hashlib.sha256(f.read_bytes()).hexdigest()} for f in [dmg, archive]]
             (a.output / 'release.json').write_text(json.dumps(record, indent=2) + '\n')

@@ -13,7 +13,7 @@ Oink, short for "Oink Is Not only a KVM", is modern software that builds a peer-
 
 ## Install
 
-Get installers and matching source from [GitHub Releases](https://github.com/oinkvm/oink/releases).
+Get installers and matching source from [GitHub Releases](https://github.com/Natsuneko3/oink/releases).
 
 Supported operating systems and versions:
 

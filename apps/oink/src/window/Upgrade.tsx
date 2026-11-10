@@ -114,7 +114,7 @@ export function UpgradeDialog({container}:{container:HTMLElement|null}) {
   const manual=update?.phase==='disabled';
   const progress=inProgress(update?.phase)&&!failed;
   const ready=update?.phase==='ready';
-  const action=failed?null:manual?<Button variant="accent" leading={<Icon name="external"/>} onClick={()=>{void shell.openUrl('https://github.com/oinkvm/oink/releases').catch(()=>agent.fail('unavailable'));}}>{tr('查看发布版本')}</Button>
+  const action=failed?null:manual?<Button variant="accent" leading={<Icon name="external"/>} onClick={()=>{void shell.openUrl('https://github.com/Natsuneko3/oink/releases').catch(()=>agent.fail('unavailable'));}}>{tr('查看发布版本')}</Button>
     :update?.phase==='available'?<Button variant="accent" loading={pending} onClick={()=>{void send({type:'download'});}}>{tr('下载更新')}</Button>
     :ready&&update.candidate?<Button variant="accent" loading={pending} onClick={()=>{void send({type:'install',expected_build:update.candidate!.build});}}>{tr('重启升级')}</Button>
     :progress&&!localPackage?<Button loading={pending} onClick={()=>{void send({type:'cancel'});}}><ProgressFill value={shownProgress(update?.phase,update?.progress)}>{tr('取消下载')}</ProgressFill></Button>:null;

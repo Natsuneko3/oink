@@ -52,9 +52,14 @@ def select_identity(team, fingerprint=None):
     return matches[0]
 
 
-def verify_signature(path, team):
+def verify_signature(path, team, *, development_signing=False):
     private_run('codesign', '--verify', '--strict', '--deep', path)
     details = private_run('codesign', '-dvv', path).stderr
+    if development_signing:
+        if ('Signature=adhoc' not in details or 'Authority=' in details or
+                ('TeamIdentifier=' in details and 'TeamIdentifier=not set' not in details)):
+            raise RuntimeError('Ad-hoc development signature verification failed')
+        return
     if ('Authority=Developer ID Application:' not in details or f'TeamIdentifier={team}' not in details
             or 'Timestamp=' not in details or 'runtime' not in details):
         raise RuntimeError('Developer ID, hardened runtime, Team ID and secure timestamp verification failed')

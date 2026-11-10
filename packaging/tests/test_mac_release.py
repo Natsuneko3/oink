@@ -61,7 +61,7 @@ class MacReleaseTests(unittest.TestCase):
             event = dict(repository=dict(default_branch='main'), inputs=dict(release_tag='v0.1.1'))
             path.write_text(json.dumps(event))
             env = dict(GITHUB_ACTIONS='true',GITHUB_EVENT_PATH=str(path),GITHUB_EVENT_NAME='workflow_dispatch',
-                       GITHUB_REF='refs/heads/main',GITHUB_REPOSITORY='oinkvm/oink')
+                       GITHUB_REF='refs/heads/main',GITHUB_REPOSITORY='Natsuneko3/oink')
             with patch.dict(os.environ,env), patch.object(M,'command',return_value=json.dumps(release).encode()):
                 M.published('v0.1.1')
             for change in [dict(draft=True), dict(prerelease=True), dict(published_at=None)]:
@@ -76,7 +76,7 @@ class MacReleaseTests(unittest.TestCase):
             record = self.record()
             # Legacy releases may list a hash-bound notes asset. Never request it.
             record['artifacts'].append(dict(name='update.json', size=99, sha256='d'*64))
-            config = dict(repository='oinkvm/oink', mac=dict(enabled=True, public_key=PUBLIC, epoch='mac-2026-01'))
+            config = dict(repository='Natsuneko3/oink', mac=dict(enabled=True, public_key=PUBLIC, epoch='mac-2026-01'))
             with patch.object(M, 'published'), patch.object(M.feed, 'ROOT', root), \
                  patch.object(M.feed, 'trust', return_value=config), \
                  patch.object(M, 'tag_source', return_value=(COMMIT, TREE, config['mac'])), \
@@ -87,7 +87,7 @@ class MacReleaseTests(unittest.TestCase):
                     M.candidate(root/'state', root/'output', root/'cache', 'v0.1.1')
                 self.assertEqual(validate.call_args.args[1], annotations)
                 download.assert_called_once_with(
-                    'https://github.com/oinkvm/oink/releases/download/v0.1.1/release.json', M.feed.MAX_FEED, redirects=True)
+                    'https://github.com/Natsuneko3/oink/releases/download/v0.1.1/release.json', M.feed.MAX_FEED, redirects=True)
 
                 M.feed.write(root / '.github/update-notes.json', {**annotations, 'channel': 'beta'})
                 with self.assertRaisesRegex(ValueError, 'stable_annotations_required'):
@@ -96,7 +96,7 @@ class MacReleaseTests(unittest.TestCase):
     def test_new_item_preserves_older_notes_archive_and_has_no_beta_channel(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / 'appcast.xml'
-            metadata = dict(version='0.1.1',build=30,length=20,sha256='c'*64,url='https://github.com/oinkvm/oink/releases/download/v0.1.1/Oink-0.1.1-macos-arm64.zip')
+            metadata = dict(version='0.1.1',build=30,length=20,sha256='c'*64,url='https://github.com/Natsuneko3/oink/releases/download/v0.1.1/Oink-0.1.1-macos-arm64.zip')
             M.write_appcast(path,None,metadata,'public-signature',NOTES)
             older = ET.fromstring(path.read_bytes()).find('./channel/item')
             self.assertEqual(older.find('enclosure').get('url'), metadata['url'])
@@ -129,11 +129,11 @@ class MacReleaseTests(unittest.TestCase):
             tool = Path(os.environ['SPARKLE_TEST_SIGN_UPDATE'])
             signature = M.sign(tool,archive,PUBLIC)
             metadata = dict(version='0.1.1',build=30,length=archive.stat().st_size,sha256=M.feed.digest(archive.read_bytes()),
-                            url='https://github.com/oinkvm/oink/releases/download/v0.1.1/Oink-0.1.1-macos-arm64.zip')
+                            url='https://github.com/Natsuneko3/oink/releases/download/v0.1.1/Oink-0.1.1-macos-arm64.zip')
             path=directory/'appcast.xml'
             M.write_appcast(path,None,metadata,signature,NOTES)
             M.sign(tool,path,PUBLIC,xml=True)
-            config=dict(mac=dict(enabled=True,epoch='mac-2026-01',public_key=PUBLIC),repository='oinkvm/oink')
+            config=dict(mac=dict(enabled=True,epoch='mac-2026-01',public_key=PUBLIC),repository='Natsuneko3/oink')
             with patch.object(M.feed,'download',return_value=archive.read_bytes()):
                 self.assertEqual(M.feed_site.appcast(path.read_bytes(),config,'stable')[0]['length'],archive.stat().st_size)
                 path.write_bytes(path.read_bytes().replace(b'Test update',b'Tampered update'))

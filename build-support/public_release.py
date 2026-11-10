@@ -119,7 +119,10 @@ def publish(directory, commit, notes):
     if record['built_commit'] != commit:
         raise ValueError('release commit differs from built commit')
     files = [directory / a['name'] for a in record['artifacts']] + [directory / 'release.json', directory / 'SHA256SUMS']
-    subprocess.run(['gh', 'release', 'create', tag, '--draft', '--target', commit, '--title', 'Oink ' + IDENTITY['version'], '--notes-file', str(notes), *map(str, files)], check=True)
+    repository = json.loads((Path(__file__).resolve().parents[1] / 'packaging/update-trust.json').read_bytes())['repository']
+    if repository != 'Natsuneko3/oink':
+        raise ValueError('custom release repository is not configured')
+    subprocess.run(['gh', 'release', 'create', tag, '--repo', repository, '--draft', '--target', commit, '--title', 'Oink ' + IDENTITY['version'], '--notes-file', str(notes), *map(str, files)], check=True)
 
 
 def main():

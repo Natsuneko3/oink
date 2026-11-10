@@ -1,4 +1,4 @@
-"""Verify canonical Pages bytes across an asynchronous snapshot transition."""
+"""Verify canonical Release asset bytes across a snapshot transition."""
 import json
 import time
 import urllib.error
@@ -21,7 +21,7 @@ def log(value):
 def fetch(url, limit, path, attempt, role, expected):
     headers = {}
     try:
-        raw = feed.download(url, limit, False, True, headers)
+        raw = feed.download(url, limit, True, True, headers)
         status = 200
     except urllib.error.HTTPError as error:
         if error.code != 404:
@@ -52,7 +52,7 @@ def verify(expected, previous, error='deployment_digest'):
         for path, raw in expected.items():
             if time.monotonic() - start > BUDGET_SECONDS:
                 raise ValueError(error)
-            url = feed.BASE + path
+            url = feed.public_url(path)
             old = previous.get(path)
             limit = max(feed.MAX_FEED, len(raw or b''), len(old or b''))
             actual = fetch(url, limit, path, attempt, 'canonical', raw)

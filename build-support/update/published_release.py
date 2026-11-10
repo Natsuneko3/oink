@@ -31,13 +31,13 @@ def published(tag, *, request=None):
                    os.environ.get('GITHUB_REF') == 'refs/heads/' + branch and
                    event.get('inputs', {}).get('release_tag') == tag)
     feed.require(os.environ.get('GITHUB_ACTIONS') == 'true' and
-                 os.environ.get('GITHUB_REPOSITORY') == 'oinkvm/oink' and
+                 os.environ.get('GITHUB_REPOSITORY') == feed.REPOSITORY and
                  is_dispatch, 'published_release_required')
     if request is None:
         request = lambda path: feed.loads(subprocess.check_output(['gh', 'api', path]))
     # A dispatch input does not authorize a now-draft,
     # deleted or prerelease release. No tagged workflow/code is executed here.
-    live = request('repos/oinkvm/oink/releases/tags/' + tag)
+    live = request(f'repos/{feed.REPOSITORY}/releases/tags/' + tag)
     feed.require(type(live.get('id')) is int and live['id'] > 0 and
                  live.get('tag_name') == tag and live.get('draft') is False and
                  live.get('prerelease') is False and live.get('published_at'), 'release_not_public')

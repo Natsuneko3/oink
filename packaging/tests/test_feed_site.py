@@ -27,7 +27,7 @@ class SiteTests(unittest.TestCase):
         self.secret = patch.dict(os.environ, {feed.KEY_ENV[EPOCH['epoch']]: PEM, 'OINK_UPDATE_QUALIFIED_BUILD': '2'})
         self.secret.start()
         self.addCleanup(self.secret.stop)
-        self.config = {'schema': 1, 'repository': 'oinkvm/oink', 'windows': [EPOCH],
+        self.config = {'schema': 1, 'repository': 'Natsuneko3/oink', 'windows': [EPOCH],
                        'mac': {'epoch': 'mac-2026-01', 'enabled': True, 'public_key': PUB}}
         self.trust = patch.object(feed, 'trust', return_value=self.config)
         self.trust.start()
@@ -42,7 +42,7 @@ class SiteTests(unittest.TestCase):
             'platforms': {p: {'enabled': False, 'revision': 0, 'files': {}} for p in feed_site.PLATFORMS},
             'feeds': {EPOCH['epoch']: {c: {'records': [], 'last_allocated': 0, 'manifest_sha256': None}
                                       for c in EPOCH['channels']}}})
-        feed.write(self.state / 'site/CNAME', b'updates.oink.hachiwii.com\n')
+        feed.write(self.state / 'site/index.html', b'<!doctype html><title>Oink updates</title><p>Oink update feeds.</p>\n')
         (self.state / 'records').mkdir()
         self.packages = {}
         self.download = patch.object(feed, 'download', side_effect=lambda url, *args: self.packages[url])
@@ -57,7 +57,7 @@ class SiteTests(unittest.TestCase):
         feed_site.bootstrap(initial, output)
         self.assertEqual(feed_site.files(output), feed_site.files(initial / 'site'))
         self.assertEqual(feed_site.files(initial), before)
-        self.assertEqual(set(feed_site.files(output)), {'CNAME', 'index.html'})
+        self.assertEqual(set(feed_site.files(output)), {'index.html'})
 
     def test_disabled_mac_snapshot_includes_x64_absence(self):
         expected = feed_site.public_files(self.state, 'mac')
@@ -78,10 +78,10 @@ class SiteTests(unittest.TestCase):
     def test_arm_only_public_readback_rejects_leftover_x64_feed(self):
         import urllib.error
         self.install('mac')
-        active = feed_site.files(self.state / 'site')
+        active = {feed.asset_name(path): raw for path, raw in feed_site.files(self.state / 'site').items()}
         def download(url, *args):
             path = url.removeprefix(feed.BASE)
-            if '/x64/' in path:
+            if '-x64-' in path:
                 return b'leftover Intel candidate'
             if path in active:
                 return active[path]
@@ -110,7 +110,7 @@ class SiteTests(unittest.TestCase):
 
     def mac(self, build, channel='beta'):
         package = b'PUBLIC TEST ARCHIVE ' + str(build).encode()
-        url = f'https://github.com/oinkvm/oink/releases/download/v1.0.{build}/Oink-arm64.zip'
+        url = f'https://github.com/Natsuneko3/oink/releases/download/v1.0.{build}/Oink-arm64.zip'
         self.packages[url] = package
         channel_tag = '<sparkle:channel>beta</sparkle:channel>' if channel == 'beta' else ''
         xml = f'''<rss xmlns:sparkle="{feed_site.SPARKLE}" xmlns:oink="{feed_site.OINK}"><channel><item>
@@ -209,7 +209,7 @@ class SiteTests(unittest.TestCase):
         feed_site.merge(self.state, mac, mac_state, 1)
         self.assertEqual(feed_site.files(mac_state / 'site/windows'),
                          feed_site.files(windows_state / 'site/windows'))
-        active = feed_site.files(windows_state / 'site')
+        active = {feed.asset_name(path): raw for path, raw in feed_site.files(windows_state / 'site').items()}
         cache = {}
         requests = []
 
@@ -239,7 +239,7 @@ class SiteTests(unittest.TestCase):
             with patch.object(feed, 'BASE', f'http://localhost:{server.server_port}/'):
                 feed_site.verify_public(windows_state)
                 self.assertEqual(cache['heartbeat.json'], active['heartbeat.json'])
-                active = feed_site.files(mac_state / 'site')
+                active = {feed.asset_name(path): raw for path, raw in feed_site.files(mac_state / 'site').items()}
                 requests.clear()
                 feed_site.verify_public(mac_state)
                 self.assertEqual(cache['heartbeat.json'], active['heartbeat.json'])
@@ -275,7 +275,7 @@ class SiteTests(unittest.TestCase):
                             self.assertEqual(feed_site.files(output / 'site' / other), preserved)
                             self.assertEqual(feed.registry(output)['revision'], 1)
                             # Readback verifies bytes and absent-platform 404s without a real deployment.
-                            public = {feed.BASE + path: raw for path, raw in feed_site.files(output / 'site').items()}
+                            public = {feed.public_url(path): raw for path, raw in feed_site.files(output / 'site').items()}
                             import urllib.error
                             def get(url, *args):
                                 if url not in public: raise urllib.error.HTTPError(url, 404, 'missing', {}, None)
@@ -422,7 +422,7 @@ class SiteTests(unittest.TestCase):
     def test_windows_publisher_revalidates_catalog_and_public_package(self):
         self.install('mac')
         raw = b'PUBLIC TEST MSI BYTES'
-        url = 'https://github.com/oinkvm/oink/releases/download/v1.0.2/Oink-x64.msi'
+        url = 'https://github.com/Natsuneko3/oink/releases/download/v1.0.2/Oink-x64.msi'
         self.packages[url] = raw
         release = {'build': 2, 'version': '1.0.2', 'tag': 'v1.0.2', 'sourceTreeSha256': 'a'*64,
                    'architecture': 'x64', 'minimumWindowsBuild': 17763, 'protocolBaseline': 1,
@@ -465,7 +465,7 @@ class SiteTests(unittest.TestCase):
 
 class TrustTests(unittest.TestCase):
     def test_disabled_is_explicit_and_enabled_missing_roots_is_an_error(self):
-        config = {'schema': 1, 'repository': 'oinkvm/oink',
+        config = {'schema': 1, 'repository': 'Natsuneko3/oink',
                   'windows': [{**copy.deepcopy(EPOCH), 'enabled': False, 'public_key': PUB}],
                   'mac': {'epoch': 'mac-2026-01', 'enabled': False, 'public_key': PUB}}
         with tempfile.TemporaryDirectory() as directory:
@@ -577,8 +577,9 @@ class DeploymentTests(unittest.TestCase):
         workflow = (root / 'deploy-feed.yml').read_text()
         self.assertNotIn('WINDOWS_UPDATE_ED25519', workflow)
         self.assertIn('group: oink-update-feed-publish', workflow)
-        self.assertIn("if: steps.publish.outputs.status == 'succeed'", workflow)
-        self.assertIn('artifact_name: previous-feed', workflow)
+        self.assertIn("if: steps.publish.outcome == 'success'", workflow)
+        self.assertIn('release_assets.py publish --state next-state', workflow)
+        self.assertIn('release_assets.py rollback --state feed-state', workflow)
         self.assertIn("steps.publish.outcome == 'failure'", workflow)
         self.assertIn("steps.commit.outcome != 'success'", workflow)
         for name in ('publish-windows-feed.yml', 'renew-windows-update-manifests.yml'):
@@ -589,11 +590,12 @@ class DeploymentTests(unittest.TestCase):
         self.assertNotIn('windows', mac.lower())
         bootstrap = (root / 'bootstrap-update-site.yml').read_text()
         self.assertIn('group: oink-update-feed-publish', bootstrap)
-        self.assertIn('environment: github-pages', bootstrap)
-        self.assertIn('feed_site.py bootstrap', bootstrap)
+        self.assertNotIn('environment: github-pages', bootstrap)
+        self.assertIn('release_assets.py initialize-state', bootstrap)
+        self.assertIn('release_assets.py bootstrap', bootstrap)
         self.assertIn('github.event.repository.default_branch', bootstrap)
-        self.assertNotIn('secrets.', bootstrap)
-        self.assertNotIn('contents: write', bootstrap)
+        self.assertIn('GH_TOKEN: ${{ github.token }}', bootstrap)
+        self.assertIn('contents: write', bootstrap)
 
 
 if __name__ == '__main__': unittest.main()

@@ -77,6 +77,16 @@ def appcast(raw, config, channel, verify_signature=True):
     return entries
 
 
+def development_publication(record, config):
+    """An explicitly opted-in fork package, without claiming Apple qualification."""
+    return (config['mac'].get('allow_development_updates') is True and
+            record.get('development_signing') is True and
+            record.get('developer_id_verified') is False and record.get('notarized') is False and
+            record.get('code_signature_verified') is True and record.get('qualified_build') is None and
+            type(record.get('build')) is int and record['build'] > 0 and
+            record.get('published_build') == record['build'])
+
+
 def verify_platform(state, platform, config, packages=False, signatures=True, verified_files=None):
     reg = state_info(state)
     slot = reg['platforms'][platform]
@@ -103,9 +113,10 @@ def verify_platform(state, platform, config, packages=False, signatures=True, ve
         verified = set()
         for path, record in slot['catalog'].items():
             match = re.fullmatch(r'mac/v1/mac-2026-01/(x64/)?(stable|beta)/appcast.xml', path)
+            qualified = (record['developer_id_verified'] is True and record['notarized'] is True and
+                         record['qualified_build'] == record['build'])
             feed.require(match and record['architecture'] == ('x64' if match[1] else 'arm64') and
-                         record['developer_id_verified'] is True and record['notarized'] is True and
-                         record['qualified_build'] == record['build'], 'mac_qualification')
+                         (qualified or development_publication(record, config)), 'mac_qualification')
             raw = (state / 'site' / path).read_bytes()
             entries = appcast(raw, config, match[2], signatures and actual[path] != (verified_files or {}).get(path) and raw not in verified)
             verified.add(raw)
@@ -128,10 +139,15 @@ def candidate(state, platform, output, catalog=None):
     if platform == 'mac':
         slot['catalog'] = feed.read(catalog)
         previous = reg['platforms']['mac']
+        config = feed.trust('mac')
         for path, record in slot['catalog'].items():
             unchanged = (slot['files'].get(path) == previous['files'].get(path) and
                          record == previous.get('catalog', {}).get(path))
-            feed.require(unchanged or str(record['qualified_build']) == os.environ.get('OINK_UPDATE_QUALIFIED_BUILD'), 'update_not_qualified')
+            authorized_development = (development_publication(record, config) and
+                                      str(record['published_build']) == os.environ.get('OINK_PUBLISHED_BUILD'))
+            feed.require(unchanged or authorized_development or
+                         str(record['qualified_build']) == os.environ.get('OINK_UPDATE_QUALIFIED_BUILD'),
+                         'update_not_qualified')
     proposal = {'schema': 1, 'platform': platform, 'base_revision': slot['revision'], 'slot': slot}
     output.mkdir(parents=True, exist_ok=False)
     shutil.copytree(state / 'site' / platform, output / 'site' / platform)
@@ -203,7 +219,6 @@ def merge(state, proposal_dir, output, expected_revision):
     # boundary; untouched platforms and HTTPS readback need only exact digests.
     verify_all(output, packages=platform == 'windows', signatures=platform == 'mac',
                verified_mac_files=old['files'] if platform == 'mac' else None)
-    feed.write(output / 'site/CNAME', b'updates.oink.hachiwii.com\n')
     feed.write(output / 'site/heartbeat.json', {'schema': 1, 'revision': reg['revision'],
                'checked_at': feed.iso(int(feed.dt.datetime.now(feed.dt.timezone.utc).timestamp()))})
 
@@ -221,7 +236,7 @@ def verify_public(state, platform=None, previous=None):
     for path, raw in files(state / 'site').items():
         if platform is not None and not path.startswith(platform + '/'):
             continue
-        feed.require(feed.download(feed.BASE + path, max(feed.MAX_FEED, len(raw)), False, True) == raw, 'deployment_digest')
+        feed.require(feed.download(feed.public_url(path), max(feed.MAX_FEED, len(raw)), True, True) == raw, 'deployment_digest')
     verify_absent(state_info(state), PLATFORMS if platform is None else (platform,))
 
 
@@ -255,7 +270,7 @@ def verify_absent(reg, platforms=PLATFORMS):
     import urllib.error
     for path in absent_paths(reg, platforms):
         try:
-            feed.download(feed.BASE + path, feed.MAX_FEED, False, True)
+            feed.download(feed.public_url(path), feed.MAX_FEED, True, True)
         except urllib.error.HTTPError as error:
             try:
                 feed.require(error.code == 404, 'disabled_feed_status')
@@ -266,24 +281,18 @@ def verify_absent(reg, platforms=PLATFORMS):
 
 
 def initialize(output):
-    """Prepare data locally; the user creates/pushes the data branch separately."""
+    """Prepare the original disabled snapshot for local or workflow bootstrap."""
     output.mkdir(parents=True, exist_ok=False)
     feed.write(output / 'registry.json', {
         'schema': 1, 'revision': 0,
         'platforms': {p: {'enabled': False, 'revision': 0, 'files': {}} for p in PLATFORMS},
         'feeds': {'win-2026-01': {c: {'records': [], 'last_allocated': 0, 'manifest_sha256': None}
                                  for c in ('stable', 'beta')}}})
-    feed.write(output / 'site/CNAME', b'updates.oink.hachiwii.com\n')
     feed.write(output / 'site/index.html', b'<!doctype html><title>Oink updates</title><p>Oink update feeds.</p>\n')
 
 
 def bootstrap(state, output):
-    """Deploy only the original disabled landing site, before HTTPS readback works.
-
-    Normal publication requires HTTPS readback before committing its state. This
-    one-time landing deployment lets Pages provision the site without that
-    dependency; it cannot replace a live feed or advance the data branch.
-    """
+    """Copy only the original disabled landing assets; never reset a live feed."""
     with tempfile.TemporaryDirectory() as temp:
         initial = Path(temp) / 'initial'
         initialize(initial)

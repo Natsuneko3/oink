@@ -57,9 +57,10 @@ class MacManifestRoles(unittest.TestCase):
             info = dict(CFBundleIdentifier=ident, CFBundleExecutable=executable,
                         CFBundleName='Oink', CFBundleDisplayName='Oink',
                         LSMinimumSystemVersion='14.2', NSAudioCaptureUsageDescription='Share audio.',
-                        SUPublicEDKey=trust['public_key'],
                         NSExtension={'NSExtensionPointIdentifier': 'com.apple.FinderSync'},
                         **macos_version_fields(version, 137))
+            if trust['public_key']:
+                info['SUPublicEDKey'] = trust['public_key']
             info[self.mac['app_group_key']] = self.group
             (bundle / 'Contents').mkdir(parents=True, exist_ok=True)
             (bundle / 'Contents/Info.plist').write_bytes(plistlib.dumps(info))

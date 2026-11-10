@@ -8,19 +8,15 @@ on:
       artifact:
         required: true
         type: string
-    secrets:
-      UPDATE_FEED_WRITER_TOKEN:
-        required: true
 permissions:
-  contents: read
-  pages: write
-  id-token: write
+  contents: write
 jobs:
   deploy:
-    if: github.repository == 'oinkvm/oink' && github.event_name != 'release' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    if: github.repository == 'Natsuneko3/oink' && github.event_name != 'release' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     runs-on: ubuntu-latest
     timeout-minutes: 25
-    environment: github-pages
+    env:
+      GH_TOKEN: ${{ github.token }}
     concurrency:
       group: oink-update-feed-publish
       cancel-in-progress: false
@@ -33,7 +29,7 @@ jobs:
         with:
           ref: update-feed-state
           path: feed-state
-          token: ${{ secrets.UPDATE_FEED_WRITER_TOKEN }}
+          token: ${{ github.token }}
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: ${{ inputs.artifact }}
@@ -42,34 +38,18 @@ jobs:
         env:
           PLATFORM: ${{ inputs.platform }}
         run: python3 build-support/update/deploy.py prepare
-      - name: Preserve exact prior deployment for rollback
-        uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4
-        with:
-          name: previous-feed-${{ inputs.platform }}
-          path: feed-state/site
-      - uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4
-        with:
-          name: next-feed-${{ inputs.platform }}
-          path: next-state/site
-      - name: Deploy complete merged snapshot
+      - name: Upload complete merged snapshot to the fork update-feed Release
         id: publish
-        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
-        with:
-          artifact_name: next-feed-${{ inputs.platform }}
-      - name: Read back custom domain and commit state with CAS
+        run: python3 build-support/update/release_assets.py publish --state next-state
+      - name: Read back public Release assets and commit state with CAS
         id: commit
-        # The pinned deploy-pages action polls the deployment API until succeed.
-        # Only exact canonical bytes permit CAS. Known frozen-parent bytes may
-        # converge for one Pages cache lifetime; cold probes must authenticate
-        # any other stale cache against the exact target, never unknown origin bytes.
-        # Cache-busted responses are diagnostic only, never deployment proof.
-        if: steps.publish.outputs.status == 'succeed'
+        # Every canonical asset must match the verified snapshot before state
+        # advances. A failed upload or CAS restores the frozen Git parent.
+        if: steps.publish.outcome == 'success'
         run: python3 build-support/update/deploy.py commit
       - name: Restore previous hosted bytes on deployment, readback or CAS failure
         if: ${{ always() && (steps.publish.outcome == 'failure' || steps.publish.outcome == 'cancelled' || (steps.publish.outcome == 'success' && steps.commit.outcome != 'success')) }}
-        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
-        with:
-          artifact_name: previous-feed-${{ inputs.platform }}
+        run: python3 build-support/update/release_assets.py rollback --state feed-state
       - name: Verify rollback bytes
         if: ${{ always() && (steps.publish.outcome == 'failure' || steps.publish.outcome == 'cancelled' || (steps.publish.outcome == 'success' && steps.commit.outcome != 'success')) }}
         run: python3 build-support/update/deploy.py verify-rollback

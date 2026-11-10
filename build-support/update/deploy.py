@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Shared Pages transaction steps; public-key verification only, no signing keys."""
+"""Shared Release snapshot transaction; public-key verification, no signing keys."""
 import argparse
 import os
 from pathlib import Path
@@ -71,7 +71,7 @@ def verify_rollback():
     for path in feed_site.absent_paths(reg):
         expected[path] = None
     # Reverse the same verified transition: frozen parent is the target and
-    # the candidate may still be visible while Pages rolls back asynchronously.
+    # the candidate may still be visible while Release CDN caches converge.
     readback.verify(expected, feed_site.files(NEXT / 'site'), 'rollback_digest')
 
 

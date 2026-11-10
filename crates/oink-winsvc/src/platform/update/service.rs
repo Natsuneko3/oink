@@ -573,8 +573,8 @@ impl Drop for Endpoint {
         let _ = self.join();
     }
 }
-pub(super) fn http(url: &str, length: u64, package: bool) -> Result<Vec<u8>, Error> {
-    let policy = if package {
+pub(super) fn http(url: &str, length: u64, redirects: bool) -> Result<Vec<u8>, Error> {
+    let policy = if redirects {
         reqwest::redirect::Policy::custom(|attempt| {
             if feed::validate_redirect(attempt.url().as_str(), attempt.previous().len()).is_ok() {
                 attempt.follow()
@@ -620,7 +620,9 @@ fn check_feed(state: &Arc<Mutex<State>>, roots: &Roots) -> Result<Option<Selecte
         state.last_check = Some(Instant::now());
         (state.policy.clone(), state.status.current_build, state.revision)
     };
-    let envelope = http(&feed::manifest_url(), feed::MAX_FEED as u64, false)?;
+    // GitHub Release assets redirect both feeds and packages to its CDN.
+    // Every hop retains HTTPS; the signed envelope remains authoritative.
+    let envelope = http(&feed::manifest_url(), feed::MAX_FEED as u64, true)?;
     let seen = policy.watermarks.get("stable").cloned().unwrap_or_default();
     let manifest = feed::verify_manifest(&envelope, &roots.feed(), &seen, now())?;
     let os_build = worker::windows_build()?;

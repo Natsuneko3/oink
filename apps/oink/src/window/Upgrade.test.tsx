@@ -131,7 +131,7 @@ describe('phase content and button labels',()=>{
     expect(within(dialog()!).getByText('Download and install updates manually for this version.')).toBeTruthy();
     expect(buttons()).toEqual(['Cancel','View releases']);
     fireEvent.click(screen.getByRole('button',{name:'View releases'}));
-    expect(mock.openUrl).toHaveBeenCalledWith('https://github.com/oinkvm/oink/releases');
+    expect(mock.openUrl).toHaveBeenCalledWith('https://github.com/Natsuneko3/oink/releases');
   });
 });
 

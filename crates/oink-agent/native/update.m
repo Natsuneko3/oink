@@ -6,6 +6,28 @@
 #include <time.h>
 typedef void (*UpdateEvent)(uint32_t,uint64_t,uint64_t,uint32_t,const char *,const char *);
 typedef void (*UpdateTiming)(uint32_t,uint64_t,uint64_t,uint64_t,uint64_t);
+// Check the original signed enclosure URL before handing any continuation to
+// Sparkle. GitHub may then redirect the authenticated archive download to its CDN.
+static BOOL forkReleaseURL(NSURL *url) {
+    if (!url) return NO;
+    NSURLComponents *parts=[NSURLComponents componentsWithURL:url resolvingAgainstBaseURL:NO];
+    if (![parts.scheme.lowercaseString isEqualToString:@"https"] ||
+        ![parts.host.lowercaseString isEqualToString:@"github.com"] ||
+        (parts.port && parts.port.integerValue!=443) || parts.user!=nil || parts.password!=nil ||
+        parts.query!=nil || parts.fragment!=nil) return NO;
+    NSString *prefix=@"/Natsuneko3/oink/releases/download/";
+    NSString *path=parts.percentEncodedPath;
+    if (![path hasPrefix:prefix]) return NO;
+    NSArray<NSString *> *release=[[path substringFromIndex:prefix.length] componentsSeparatedByString:@"/"];
+    if (release.count!=2) return NO;
+    NSCharacterSet *invalid=[[NSCharacterSet characterSetWithCharactersInString:
+        @"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.+"] invertedSet];
+    for (NSString *component in release) {
+        if (!component.length || [component isEqualToString:@"."] || [component isEqualToString:@".."] ||
+            [component rangeOfCharacterFromSet:invalid].location!=NSNotFound) return NO;
+    }
+    return YES;
+}
 // Internal boundary tags are shared with src/update/native.rs.
 typedef NS_ENUM(uint32_t, OinkUpdateBoundary) {
     OinkDownloadStarted=1, OinkDownloadFinished, OinkExtractionStarted,
@@ -112,9 +134,9 @@ static char updateReadinessContext;
 }
 - (NSString *)feedURLStringForUpdater:(SPUUpdater *)updater {
 #if defined(__x86_64__)
-    return @"https://updates.oink.hachiwii.com/mac/v1/mac-2026-01/x64/stable/appcast.xml";
+    return @"https://github.com/Natsuneko3/oink/releases/download/update-feed/mac-v1-mac-2026-01-x64-stable-appcast.xml";
 #else
-    return @"https://updates.oink.hachiwii.com/mac/v1/mac-2026-01/stable/appcast.xml";
+    return @"https://github.com/Natsuneko3/oink/releases/download/update-feed/mac-v1-mac-2026-01-stable-appcast.xml";
 #endif
 }
 - (NSSet<NSString *> *)allowedChannelsForUpdater:(SPUUpdater *)updater {return [NSSet set];}
@@ -129,6 +151,10 @@ static char updateReadinessContext;
     _checkPending=NO; // An in-flight check supplied the requested result.
     _cancelDownload=nil; _cancelled=NO; _build=item.versionString.longLongValue; _expected=item.contentLength;
     if (_build==0 || item.informationOnlyUpdate || item.majorUpgrade) {reply(SPUUserUpdateChoiceDismiss); [self event:8 progress:4]; return;}
+    if (!forkReleaseURL(item.fileURL)) {
+        _found=nil; _ready=nil; _armed=NO;
+        reply(SPUUserUpdateChoiceDismiss); [self event:8 progress:2]; return;
+    }
     // A local DMG replacement bypasses Sparkle's installer bookkeeping. Its
     // cached session may still offer the build now running (or an older one).
     // Dismiss at the continuation owner before publishing or arming it; local

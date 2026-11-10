@@ -6,19 +6,11 @@ on:
         description: Published stable release; never a draft or arbitrary artifact
         required: true
         type: string
-    secrets:
-      SPARKLE_ED25519_PRIVATE_KEY:
-        description: Supplied by the sign job's release environment
-        required: true
-      UPDATE_FEED_WRITER_TOKEN:
-        required: true
 permissions:
-  contents: read
-  pages: write
-  id-token: write
+  contents: write
 jobs:
   gate:
-    if: github.repository == 'oinkvm/oink' && github.event_name == 'workflow_dispatch' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    if: github.repository == 'Natsuneko3/oink' && github.event_name == 'workflow_dispatch' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -116,5 +108,3 @@ jobs:
     with:
       platform: mac
       artifact: verified-macos-feed
-    secrets:
-      UPDATE_FEED_WRITER_TOKEN: ${{ secrets.UPDATE_FEED_WRITER_TOKEN }}

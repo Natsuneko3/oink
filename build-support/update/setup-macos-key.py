@@ -16,9 +16,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from sparkle import prepare
 
 ROOT = Path(__file__).resolve().parents[2]
-ACCOUNT = 'Oink-mac-2026-01'
+ACCOUNT = 'Natsuneko3-oink-mac-2026-01'
 SECRET = 'SPARKLE_ED25519_PRIVATE_KEY'
-REPOSITORY = 'oinkvm/oink'
+REPOSITORY = 'Natsuneko3/oink'
 
 
 def private_run(command, **kwargs):
@@ -34,6 +34,8 @@ def setup(cache):
         raise RuntimeError('run locally on the key owner\'s Mac, outside CI')
     config_path = ROOT / 'packaging/update-trust.json'
     config = json.loads(config_path.read_bytes())
+    if config['repository'] != REPOSITORY:
+        raise RuntimeError('unexpected update repository')
     private_run(['gh', 'auth', 'status'])
     private_run(['gh', 'api', f'repos/{REPOSITORY}/environments/release'])
     tool = str(prepare(cache) / 'bin/generate_keys')

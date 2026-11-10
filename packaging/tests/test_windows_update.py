@@ -218,7 +218,7 @@ class PublishedRelease(unittest.TestCase):
         self.root = Path(self.temporary.name)
         self.event_path = self.root / 'event.json'
         self.output_path = self.root / 'output'
-        self.env = {'GITHUB_ACTIONS': 'true', 'GITHUB_EVENT_NAME': 'workflow_dispatch', 'GITHUB_REPOSITORY': 'oinkvm/oink',
+        self.env = {'GITHUB_ACTIONS': 'true', 'GITHUB_EVENT_NAME': 'workflow_dispatch', 'GITHUB_REPOSITORY': 'Natsuneko3/oink',
                     'GITHUB_REF': 'refs/heads/main',
                     'OINK_RELEASE_TAG': 'v1.0.0', 'GITHUB_EVENT_PATH': str(self.event_path),
                     'GITHUB_OUTPUT': str(self.root / 'github-output')}
@@ -234,11 +234,11 @@ class PublishedRelease(unittest.TestCase):
                        'platforms': {'windows': {'build': 3, 'version': '1.0.0', 'built_commit': 'b'*40,
                                                 'source_tree_sha256': 'a'*64, 'artifacts': [self.msi_artifact]}}}
         self.raw_assets = {'release.json': feed.encode(self.record), 'Oink-1.0.0-windows-x64.msi': self.msi}
-        self.config = {'repository': 'oinkvm/oink', 'windows': [EPOCH]}
+        self.config = {'repository': 'Natsuneko3/oink', 'windows': [EPOCH]}
 
     def prepare(self, commit='b'*40, source='a'*64):
         feed.write(self.event_path, self.event)
-        self.live['assets'] = [dict(name=name, size=len(raw), browser_download_url=f'https://github.com/oinkvm/oink/releases/download/v1.0.0/{name}') for name, raw in self.raw_assets.items()]
+        self.live['assets'] = [dict(name=name, size=len(raw), browser_download_url=f'https://github.com/Natsuneko3/oink/releases/download/v1.0.0/{name}') for name, raw in self.raw_assets.items()]
         with patch.object(published, 'gh_json', return_value=self.live), \
                 patch.object(published.feed, 'download', side_effect=lambda url, *args: self.raw_assets[url.rsplit('/', 1)[1]]), \
                 patch.object(published.subprocess, 'run') as run, \

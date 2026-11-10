@@ -28,21 +28,25 @@ pub enum Channel {
 }
 
 pub fn manifest_url() -> String {
-    format!(
-        "{}/windows/v1/{}/stable/manifest.json",
-        feed_origin(),
-        crate::WINDOWS_EPOCH
-    )
-}
-fn feed_origin() -> &'static str {
     #[cfg(feature = "test-feed")]
     {
-        concat!(env!("OINK_WINDOWS_UPDATE_TEST_FEED"), "/oink-update-qualification")
+        format!(
+            "{}/windows/v1/{}/stable/manifest.json",
+            feed_origin(),
+            crate::WINDOWS_EPOCH
+        )
     }
     #[cfg(not(feature = "test-feed"))]
     {
-        "https://updates.oink.hachiwii.com"
+        format!(
+            "https://github.com/Natsuneko3/oink/releases/download/update-feed/windows-v1-{}-stable-manifest.json",
+            crate::WINDOWS_EPOCH
+        )
     }
+}
+#[cfg(feature = "test-feed")]
+fn feed_origin() -> &'static str {
+    concat!(env!("OINK_WINDOWS_UPDATE_TEST_FEED"), "/oink-update-qualification")
 }
 
 /// Extensible plain-text notes. Language matching is case-insensitive RFC-style
@@ -378,8 +382,9 @@ fn https_url(s: &str) -> Result<Url, Error> {
     }
     Ok(url)
 }
-/// Package hosts/paths are selected by the signed manifest, not compiled pins.
-/// The exact downloaded bytes must still pass verify_package before staging/use.
+/// A signed feed may only offer this fork's versioned GitHub Release assets.
+/// CDN redirects are separate from this original source constraint; the exact
+/// downloaded bytes must still pass verify_package before staging/use.
 pub fn validate_package_url(s: &str) -> Result<(), Error> {
     #[cfg(feature = "test-feed")]
     {
@@ -391,7 +396,26 @@ pub fn validate_package_url(s: &str) -> Result<(), Error> {
             return Ok(());
         }
     }
-    https_url(s).map(|_| ())
+    let url = https_url(s)?;
+    if url.host_str() != Some("github.com") || url.port().is_some() || url.query().is_some() || url.fragment().is_some()
+    {
+        return Err(Error::Url);
+    }
+    let release = url
+        .path()
+        .strip_prefix("/Natsuneko3/oink/releases/download/")
+        .ok_or(Error::Url)?;
+    let parts: Vec<_> = release.split('/').collect();
+    if parts.len() != 2
+        || parts.iter().any(|part| {
+            part.is_empty()
+                || matches!(*part, "." | "..")
+                || !part.bytes().all(|b| b.is_ascii_alphanumeric() || b"-_.+".contains(&b))
+        })
+    {
+        return Err(Error::Url);
+    }
+    Ok(())
 }
 /// Every redirect hop must retain HTTPS without userinfo, to any host.
 pub fn validate_redirect(s: &str, hop: usize) -> Result<(), Error> {
