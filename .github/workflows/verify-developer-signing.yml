@@ -39,7 +39,8 @@ jobs:
           identity = select_identity(mac['team_id'], mac['signing_fingerprint'], kind='apple-development')
           with tempfile.TemporaryDirectory() as folder:
               binary = pathlib.Path(folder) / 'signing-check'
-              shutil.copy2('/usr/bin/true', binary)
+              shutil.copyfile('/usr/bin/true', binary)
+              binary.chmod(0o755)
               subprocess.run(['codesign', '--remove-signature', str(binary)], check=True, capture_output=True)
               entitlements = pathlib.Path(folder) / 'entitlements.plist'
               entitlements.write_bytes(plistlib.dumps({'com.apple.security.application-groups': [mac['team_id'] + '.' + mac['app_group_suffix']], 'com.apple.security.device.audio-input': True}))
