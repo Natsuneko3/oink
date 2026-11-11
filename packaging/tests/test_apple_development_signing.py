@@ -1,5 +1,4 @@
 """A fork signing identity must be selected and verified without weakening distribution checks."""
-import copy
 import importlib.util
 import sys
 from pathlib import Path

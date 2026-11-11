@@ -53,9 +53,13 @@ for previous in "$destination" "$legacy_destination"; do
     # Verify every existing bundle before backups/removal, including the legacy
     # name. Never trust a data-directory receipt or the filename alone.
     [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$previous/Contents/Info.plist")" == "$identifier" ]] || { echo 'Unexpected installed microphone bundle ID' >&2; exit 2; }
-    signing_team=9559Z74J33
-    if [[ "$previous" == "$legacy_destination" ]]; then signing_team=893V37X2CW; fi
-    codesign --verify --strict -R "=identifier \"$identifier\" and anchor apple generic and certificate leaf[subject.OU] = \"$signing_team\"" "$previous"
+    # Existing Oink drivers may carry the previous upstream team's signature.
+    # This migration exception never applies to the new source payload.
+    team_requirement='(certificate leaf[subject.OU] = "9559Z74J33" or certificate leaf[subject.OU] = "893V37X2CW")'
+    if [[ "$previous" == "$legacy_destination" ]]; then
+      team_requirement='certificate leaf[subject.OU] = "893V37X2CW"'
+    fi
+    codesign --verify --strict -R "=identifier \"$identifier\" and anchor apple generic and $team_requirement" "$previous"
   fi
 done
 for previous in "$destination" "$legacy_destination"; do

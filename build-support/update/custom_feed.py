@@ -152,8 +152,7 @@ def mac_candidate(state, work, candidate, record, package, tag, cache):
                 from signing import verify_signature
                 for binary in app.rglob('*'):
                     if binary.is_file() and not binary.is_symlink():
-                        header = binary.open('rb')
-                        with header:
+                        with binary.open('rb') as header:
                             magic = header.read(4)
                         if magic in (b'\xcf\xfa\xed\xfe', b'\xce\xfa\xed\xfe', b'\xca\xfe\xba\xbe', b'\xca\xfe\xba\xbf'):
                             verify_signature(binary, IDENTITY['macos']['team_id'], apple_development=True,
