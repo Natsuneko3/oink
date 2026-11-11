@@ -34,7 +34,7 @@ case "$mode" in
     codesign --verify --strict "$source_bundle"
     [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$source_bundle/Contents/Info.plist")" == com.hachiwii.oink.microphone.driver ]] || exit 2
     # Read all output: grep -q can give codesign SIGPIPE after a match under pipefail.
-    codesign -dv --verbose=2 "$source_bundle" 2>&1 | /usr/bin/grep -x 'TeamIdentifier=893V37X2CW' >/dev/null || { echo 'Unexpected signing team' >&2; exit 2; }
+    codesign -dv --verbose=2 "$source_bundle" 2>&1 | /usr/bin/grep -x 'TeamIdentifier=9559Z74J33' >/dev/null || { echo 'Unexpected signing team' >&2; exit 2; }
     ;;
   uninstall) ;;
   *) echo 'Usage: install.sh install <bundle> | uninstall' >&2; exit 2 ;;
@@ -53,7 +53,9 @@ for previous in "$destination" "$legacy_destination"; do
     # Verify every existing bundle before backups/removal, including the legacy
     # name. Never trust a data-directory receipt or the filename alone.
     [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$previous/Contents/Info.plist")" == "$identifier" ]] || { echo 'Unexpected installed microphone bundle ID' >&2; exit 2; }
-    codesign --verify --strict -R "=identifier \"$identifier\" and anchor apple generic and certificate leaf[subject.OU] = \"893V37X2CW\"" "$previous"
+    signing_team=9559Z74J33
+    if [[ "$previous" == "$legacy_destination" ]]; then signing_team=893V37X2CW; fi
+    codesign --verify --strict -R "=identifier \"$identifier\" and anchor apple generic and certificate leaf[subject.OU] = \"$signing_team\"" "$previous"
   fi
 done
 for previous in "$destination" "$legacy_destination"; do

@@ -120,7 +120,7 @@ class PublicRelease(unittest.TestCase):
                 calls.append(args)
                 return '"original.keychain-db"' if kwargs.get('capture') else None
             def select(team,fingerprint):
-                self.assertEqual(team,'893V37X2CW');self.assertEqual(fingerprint,'A'*40)
+                self.assertEqual(team,'9559Z74J33');self.assertEqual(fingerprint,'A'*40)
                 self.assertEqual(calls[-1][:5],('security','list-keychains','-d','user','-s'))
                 self.assertEqual(calls[-1][5],str(Path(tmp)/'release-signing/signing.keychain-db'))
             with patch.dict(os.environ,env,clear=True),patch.object(sys,'argv',['ci-keychain.py']),patch.object(module,'run',side_effect=run),patch.object(signing,'select_identity',side_effect=select):

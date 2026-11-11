@@ -165,7 +165,7 @@ fn require_backend() -> Result<()> {
     // packaging rule now gives it a distinct identity. A trusted-application
     // ACL compares designated requirements, not just executable paths.
     let requirement = string(
-        r#"anchor apple generic and identifier "com.hachiwii.oink" and certificate leaf[subject.OU] = "893V37X2CW""#,
+        r#"anchor apple generic and identifier "com.hachiwii.oink" and certificate leaf[subject.OU] = "9559Z74J33""#,
     )?;
     let mut me = ptr::null();
     let mut req = ptr::null();

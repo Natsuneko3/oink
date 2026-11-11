@@ -32,13 +32,19 @@ def main():
         if directory.exists():
             shutil.rmtree(directory)
         return
+    development = sys.argv[1:] == ['--development']
+    if sys.argv[1:] not in ([], ['--development']):
+        raise SystemExit('Unsupported signing setup mode')
     with open(os.environ['GITHUB_OUTPUT'], 'a') as out:
         required = ['MACOS_CERTIFICATE_P12', 'MACOS_CERTIFICATE_PASSWORD', 'MACOS_SIGNING_FINGERPRINT',
-                    'APPLE_NOTARY_KEY_P8', 'APPLE_NOTARY_KEY_ID', 'APPLE_NOTARY_ISSUER']
+                    *([] if development else ['APPLE_NOTARY_KEY_P8', 'APPLE_NOTARY_KEY_ID', 'APPLE_NOTARY_ISSUER'])]
         if not all(os.environ.get(name) for name in required):
             raise RuntimeError('Developer ID and notarization credentials are required for release packages')
         from signing import select_identity
-        team = json.loads((Path(__file__).parents[1] / 'identity.json').read_text())['macos']['team_id']
+        mac = json.loads((Path(__file__).parents[1] / 'identity.json').read_text())['macos']
+        team = mac['team_id']
+        if development and os.environ['MACOS_SIGNING_FINGERPRINT'].upper() != mac['signing_fingerprint']:
+            raise RuntimeError('Development certificate fingerprint differs from the configured identity')
         directory.mkdir(mode=0o700)
         original = shlex.split(run('security', 'list-keychains', '-d', 'user', capture=True))
         (directory / 'original.json').write_text(json.dumps(original))
@@ -53,8 +59,14 @@ def main():
         certificate.unlink()
         run('security', 'set-key-partition-list', '-S', 'apple-tool:,apple:,codesign:', '-s', '-k', password, str(keychain))
         run('security', 'list-keychains', '-d', 'user', '-s', str(keychain), *original)
-        select_identity(team, os.environ['MACOS_SIGNING_FINGERPRINT'])
+        if development:
+            select_identity(team, os.environ['MACOS_SIGNING_FINGERPRINT'], kind='apple-development')
+        else:
+            select_identity(team, os.environ['MACOS_SIGNING_FINGERPRINT'])
         out.write('signed=true\n')
+        if development:
+            out.write('notarize=false\n')
+            return
         key = directory / 'notary.p8'
         key.write_text(os.environ['APPLE_NOTARY_KEY_P8'])
         key.chmod(0o600)

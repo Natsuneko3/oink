@@ -35,7 +35,7 @@ let providerLogSubsystem = "com.hachiwii.oink.fileprovider"
 #endif
 let providerDomain = providerDomainBase
 
-private let approvedAppGroup = "893V37X2CW.com.hachiwii.oink.files"
+private let approvedAppGroup = "9559Z74J33.com.hachiwii.oink.files"
 
 // The Rust owner watcher subscribes before accounting. One wake reconciles the
 // whole root, so coalescing is safe. FSEvents can omit a just-notified modify

@@ -2,7 +2,7 @@
 // meet Apple's Developer ID requirement; notarization is a separate requirement.
 #import <Foundation/Foundation.h>
 #import <Security/Security.h>
-static NSString *const identityRequirement=@"anchor apple generic and identifier \"com.hachiwii.oink\" and certificate leaf[subject.OU] = \"893V37X2CW\" and certificate 1[field.1.2.840.113635.100.6.2.6] exists and certificate leaf[field.1.2.840.113635.100.6.1.13] exists";
+static NSString *const identityRequirement=@"anchor apple generic and identifier \"com.hachiwii.oink\" and certificate leaf[subject.OU] = \"9559Z74J33\" and certificate 1[field.1.2.840.113635.100.6.2.6] exists and certificate leaf[field.1.2.840.113635.100.6.1.13] exists";
 static uint32_t verifyIdentity(const char *path, NSString *identity) {
     @autoreleasepool {
         NSURL *url=[NSURL fileURLWithPath:[NSString stringWithUTF8String:path]];

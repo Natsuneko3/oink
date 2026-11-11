@@ -37,13 +37,13 @@ trap '/bin/rm -rf "$stage"' EXIT
 # blocks. Fall back on volumes that do not support clonefile.
 /bin/cp -cR "$source_app" "$stage/Oink.app" 2>/dev/null || /usr/bin/ditto "$source_app" "$stage/Oink.app"
 app="$stage/Oink.app"
-requirement='=identifier "com.hachiwii.oink" and anchor apple generic and certificate leaf[subject.OU] = "893V37X2CW"'
+requirement='=identifier "com.hachiwii.oink" and anchor apple generic and certificate leaf[subject.OU] = "9559Z74J33"'
 /usr/bin/codesign --verify --deep --strict -R "$requirement" "$app"
 [[ ! -L "$app/Contents" && ! -L "$app/Contents/Resources" ]] || exit 2
 payload="$app/Contents/Resources/AudioPlugin"
 [[ -d "$payload" && ! -L "$payload" && -f "$payload/install.sh" && ! -L "$payload/install.sh" ]] || exit 2
 [[ -d "$payload/OinkMicrophone.driver" && ! -L "$payload/OinkMicrophone.driver" ]] || exit 2
-/usr/bin/codesign --verify --strict -R '=identifier "com.hachiwii.oink.microphone.driver" and anchor apple generic and certificate leaf[subject.OU] = "893V37X2CW"' "$payload/OinkMicrophone.driver"
+/usr/bin/codesign --verify --strict -R '=identifier "com.hachiwii.oink.microphone.driver" and anchor apple generic and certificate leaf[subject.OU] = "9559Z74J33"' "$payload/OinkMicrophone.driver"
 app_sha="$(/usr/bin/plutil -extract source_tree_sha256 raw -o - "$app/Contents/Resources/oink-build.json")"
 plugin_sha="$(/usr/libexec/PlistBuddy -c 'Print :OinkGitSHA' "$payload/OinkMicrophone.driver/Contents/Info.plist")"
 [[ "$app_sha" == "$plugin_sha" && "$app_sha" == "$expected_sha" ]] || { echo 'Bundled plugin revision differs from application' >&2; exit 2; }

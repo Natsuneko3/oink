@@ -19,6 +19,8 @@ jobs:
           python-version: '3.14.6'
       - name: Verify signing behavior
         run: python3 -m unittest discover -s packaging/tests -p test_apple_development_signing.py -v
+      - name: Select OpenSSL 3
+        run: echo "$(brew --prefix openssl@3)/bin" >> "$GITHUB_PATH"
       - name: Verify packaging checks
         run: python3 -m unittest discover -s packaging/tests -v
       - name: Import the pinned development identity
@@ -30,7 +32,7 @@ jobs:
       - name: Verify real Apple Development signature
         run: |
           python3 - <<'PY'
-          import hashlib, json, os, pathlib, shutil, subprocess, sys, tempfile
+          import hashlib, json, os, pathlib, plistlib, shutil, subprocess, sys, tempfile
           sys.path.insert(0, 'packaging/macos')
           from signing import select_identity, verify_signature
           mac = json.loads(pathlib.Path('packaging/identity.json').read_text())['macos']
@@ -39,7 +41,9 @@ jobs:
               binary = pathlib.Path(folder) / 'signing-check'
               shutil.copy2('/usr/bin/true', binary)
               subprocess.run(['codesign', '--remove-signature', str(binary)], check=True, capture_output=True)
-              subprocess.run(['codesign', '--force', '--timestamp=none', '--sign', identity, str(binary)], check=True, capture_output=True)
+              entitlements = pathlib.Path(folder) / 'entitlements.plist'
+              entitlements.write_bytes(plistlib.dumps({'com.apple.security.application-groups': [mac['team_id'] + '.' + mac['app_group_suffix']], 'com.apple.security.device.audio-input': True}))
+              subprocess.run(['codesign', '--force', '--timestamp=none', '--sign', identity, '--entitlements', str(entitlements), str(binary)], check=True, capture_output=True)
               verify_signature(binary, mac['team_id'], apple_development=True)
               subprocess.run(['codesign', '-d', '--extract-certificates', str(pathlib.Path(folder) / 'cert'), str(binary)], check=True, capture_output=True)
               actual = hashlib.sha1((pathlib.Path(folder) / 'cert0').read_bytes()).hexdigest().upper()

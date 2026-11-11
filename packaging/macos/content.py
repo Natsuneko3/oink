@@ -11,7 +11,7 @@ from macos_imports import verify_imports
 from versioning import release_version, macos_version_fields
 
 
-def verify_microphone(app, source_tree_sha256, team_id, *, development_signing=False):
+def verify_microphone(app, source_tree_sha256, team_id, *, development_signing=False, apple_development=False, fingerprint=None):
     plugin = app / 'Contents/Resources/AudioPlugin/OinkMicrophone.driver'
     plugin_info = plistlib.loads((plugin / 'Contents/Info.plist').read_bytes())
     if (plugin_info.get('CFBundleIdentifier') != 'com.hachiwii.oink.microphone.driver'
@@ -19,7 +19,9 @@ def verify_microphone(app, source_tree_sha256, team_id, *, development_signing=F
             or plugin_info.get('OinkGitSHA') != source_tree_sha256
             or not re.fullmatch(r'[a-f0-9]{64}', plugin_info.get('OinkPluginVersion', ''))):
         raise RuntimeError('Virtual microphone identity/provenance mismatch')
-    if development_signing:
+    if apple_development:
+        verify_signature(plugin, team_id, apple_development=True, fingerprint=fingerprint)
+    elif development_signing:
         verify_signature(plugin, None, development_signing=True)
     else:
         verify_signature(plugin, team_id)
@@ -85,7 +87,7 @@ def verify_manager_signing_identity(details, backend_id):
         raise RuntimeError('File Provider manager must not share backend Keychain signing identity')
 
 
-def verify_app(app, identity, architecture='arm64', *, development_signing=False):
+def verify_app(app, identity, architecture='arm64', *, development_signing=False, apple_development=False):
     verify_imports([app], identity['macos_minimum'])
     if any(app.rglob('*.dSYM')) or any(app.rglob('*.pdb')) or any(app.rglob('*.map')):
         raise RuntimeError('Private symbols must not be embedded in the Mac app')
@@ -153,8 +155,9 @@ def verify_app(app, identity, architecture='arm64', *, development_signing=False
         verify_component_groups(role, entitlements, group)
     metadata = json.loads((app / 'Contents/Resources' / identity['metadata_file']).read_text())
     if development_signing:
-        if metadata.get('signing') != 'ad-hoc' or metadata.get('development_signing') is not True:
-            raise RuntimeError('Mac development package must explicitly record ad-hoc signing')
+        expected_signing = 'apple-development' if apple_development else 'ad-hoc'
+        if metadata.get('signing') != expected_signing or metadata.get('development_signing') is not True:
+            raise RuntimeError('Mac development package must accurately record its signing mode')
     elif metadata.get('signing') == 'ad-hoc' or metadata.get('development_signing'):
         raise RuntimeError('Development package cannot use the Developer ID verification path')
     from provenance import ROOT
@@ -181,7 +184,14 @@ def verify_app(app, identity, architecture='arm64', *, development_signing=False
         raise RuntimeError('Mac crash report manifest differs from shipped images')
     if not (app / 'Contents/Frameworks/Sparkle.framework').is_dir():
         raise RuntimeError('Sparkle.framework missing')
-    if development_signing:
+    if apple_development:
+        fingerprint = mac['signing_fingerprint']
+        verify_microphone(app, metadata['source_tree_sha256'], mac['team_id'],
+                          apple_development=True, fingerprint=fingerprint)
+        for binary in binaries.values():
+            verify_signature(binary, mac['team_id'], apple_development=True, fingerprint=fingerprint)
+        verify_signature(app, mac['team_id'], apple_development=True, fingerprint=fingerprint)
+    elif development_signing:
         verify_microphone(app, metadata['source_tree_sha256'], None, development_signing=True)
         verify_signature(app, None, development_signing=True)
     else:

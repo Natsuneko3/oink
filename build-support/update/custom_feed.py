@@ -23,7 +23,7 @@ import release
 import release_assets
 
 sys.path.insert(0, str(feed.ROOT / 'build-support'))
-from identity import IDENTITY
+from identity import IDENTITY, valid_development_identity
 from provenance import source_tree_sha256
 from sparkle import prepare
 
@@ -120,8 +120,7 @@ def mac_candidate(state, work, candidate, record, package, tag, cache):
     signer = prepare(cache) / 'bin/sign_update'
     for platform, architecture, arch_path in (('macos', 'arm64', ''), ('macos-x64', 'x64', 'x64/')):
         metadata = record['platforms'][platform]
-        feed.require(metadata.get('development_signing') is True and metadata.get('signing') == 'ad-hoc' and
-                     metadata.get('notarized') is False and metadata.get('team_id') is None and
+        feed.require(valid_development_identity(metadata) and metadata.get('notarized') is False and
                      metadata['built_commit'] == record['built_commit'] and
                      metadata['source_tree_sha256'] == record['source_tree_sha256'] and
                      metadata['build'] == record['build'] and metadata['version'] == record['version'] and
@@ -148,6 +147,19 @@ def mac_candidate(state, work, candidate, record, package, tag, cache):
             command(['ditto', '-x', '-k', archive, staging])
             app = staging / 'Oink.app'
             command(['codesign', '--verify', '--strict', '--deep', app])
+            if metadata['signing'] == 'apple-development':
+                sys.path.insert(0, str(feed.ROOT / 'packaging/macos'))
+                from signing import verify_signature
+                for binary in app.rglob('*'):
+                    if binary.is_file() and not binary.is_symlink():
+                        header = binary.open('rb')
+                        with header:
+                            magic = header.read(4)
+                        if magic in (b'\xcf\xfa\xed\xfe', b'\xce\xfa\xed\xfe', b'\xca\xfe\xba\xbe', b'\xca\xfe\xba\xbf'):
+                            verify_signature(binary, IDENTITY['macos']['team_id'], apple_development=True,
+                                             fingerprint=IDENTITY['macos']['signing_fingerprint'])
+                verify_signature(app, IDENTITY['macos']['team_id'], apple_development=True,
+                                 fingerprint=IDENTITY['macos']['signing_fingerprint'])
             native_arch = 'arm64' if architecture == 'arm64' else 'x86_64'
             arches = command(['lipo', '-archs', app / 'Contents/MacOS/oink-backend']).decode().split()
             feed.require(arches == [native_arch], 'mac_archive_architecture')
@@ -157,7 +169,8 @@ def mac_candidate(state, work, candidate, record, package, tag, cache):
                            'length': asset['size'], 'sha256': asset['sha256'],
                            'developer_id_verified': False, 'notarized': False, 'development_signing': True,
                            'code_signature_verified': True, 'qualified_build': None,
-                           'published_build': record['build']}
+                           'published_build': record['build'], 'signing': metadata['signing'],
+                           'team_id': metadata.get('team_id'), 'certificate_sha1': metadata.get('certificate_sha1')}
             for channel in ('stable', 'beta'):
                 relative = f'mac/v1/{config["mac"]["epoch"]}/{arch_path}{channel}/appcast.xml'
                 previous = catalog.get(relative)

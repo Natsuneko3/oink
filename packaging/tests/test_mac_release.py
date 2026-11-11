@@ -24,7 +24,7 @@ class MacReleaseTests(unittest.TestCase):
     def record(self):
         asset = dict(name='Oink-0.1.1-macos-arm64.zip', size=20, sha256='c'*64)
         common = dict(version='0.1.1', build=30, built_commit=COMMIT, source_tree_sha256=TREE)
-        mac = dict(**common, source_commit=None, team_id='893V37X2CW', notarized=True,
+        mac = dict(**common, source_commit=None, team_id='9559Z74J33', notarized=True,
                    notarization={k:dict(status='Accepted',stapled=True) for k in ['app','dmg']},
                    launch_smoke=dict(status='passed',signed=True,seconds=10),
                    sparkle=dict(public_key_configured=True), artifacts=[asset])

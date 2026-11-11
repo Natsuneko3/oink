@@ -20,7 +20,7 @@ from identity import artifact_stem
 import package_notes
 from payload import copy_notices
 from report_manifest import write_manifest, image_identity
-from signing import private_run, select_identity, notarize, staple_and_validate, awake_for_signing
+from signing import signing_configuration, private_run, select_identity, notarize, staple_and_validate, awake_for_signing
 from sparkle import prepare as prepare_sparkle, VERSION as SPARKLE_VERSION, SHA256 as SPARKLE_SHA256
 from localizations import DECLARATIONS, STRINGS, write_localizations
 from macos_imports import verify_imports
@@ -80,6 +80,7 @@ def main():
     p.add_argument('--build', type=int, required=True)
     p.add_argument('--source-tree-sha256', required=True)
     p.add_argument('--signing-fingerprint', default=os.environ.get('MACOS_SIGNING_FINGERPRINT'))
+    p.add_argument('--signing-mode', choices=['ad-hoc', 'apple-development', 'developer-id'])
     p.add_argument('--development-signing', action='store_true',
                    help='Explicitly produce an ad-hoc signed, unnotarized Mac development package')
     p.add_argument('--development-cross-compile', action='store_true',
@@ -90,8 +91,15 @@ def main():
     p.add_argument('--notary-keychain', type=Path, help='Optional non-default keychain containing the notary profile')
     p.add_argument('--sparkle-cache', type=Path)
     a = p.parse_args()
-    if a.development_signing and (a.signing_fingerprint or a.notary_profile or a.notary_keychain):
-        p.error('development signing cannot use a Developer ID identity or notary credentials')
+    try:
+        policy = signing_configuration(I['macos'], mode=a.signing_mode,
+            development_signing=a.development_signing, fingerprint=a.signing_fingerprint,
+            notary_profile=a.notary_profile, notary_keychain=a.notary_keychain)
+    except ValueError as error:
+        p.error(str(error))
+    a.signing_mode, a.signing_fingerprint = policy['mode'], policy['fingerprint']
+    a.development_signing = a.signing_mode != 'developer-id'
+    a.adhoc_signing = a.signing_mode == 'ad-hoc'
     if a.development_cross_compile and not (
             a.arch == 'arm64' and a.development_signing and platform.system() == 'Darwin' and
             platform.machine().lower() == 'x86_64'):
@@ -109,7 +117,7 @@ def main():
     if trust['mac']['enabled'] and not trust['mac']['public_key']:
         p.error('enabled Mac updates require the compiled Sparkle public key')
     a.sparkle_public_key = trust['mac']['public_key']
-    a.identity = '-' if a.development_signing else select_identity(a.team, a.signing_fingerprint)
+    a.identity = '-' if a.adhoc_signing else select_identity(a.team, a.signing_fingerprint, kind=a.signing_mode)
     provenance = verify(a.binaries, a.source_tree_sha256, a.version, ('aarch64-apple-darwin' if a.arch == 'arm64' else 'x86_64-apple-darwin'), a.build, a.source_commit)
     if not a.sparkle_cache:
         p.error('the Mac package requires Sparkle.framework')
@@ -306,7 +314,7 @@ def main():
                                                          'images': symbol_records}, indent=2) + '\n')
         record = dict(schema=1, product=I['name'], version=a.version, source_commit=a.source_commit, build=a.build, provenance='source-tree', source_tree_sha256=a.source_tree_sha256,
                       architecture=a.arch, minimum_os=I['macos_minimum'], protocol_baseline=1,
-                      signing='ad-hoc' if a.development_signing else 'developer-id',
+                      signing=a.signing_mode,
                       development_signing=a.development_signing,
                       hardened_runtime=not a.development_signing,
                       notarization='see detached release record',
@@ -368,7 +376,8 @@ def main():
             sign(app, I['bundle_id'], tmp / 'host.plist')
             from content import verify_app
             if a.development_signing:
-                record['components'] = verify_app(app, I, native_arch, development_signing=True)
+                record['components'] = verify_app(app, I, native_arch, development_signing=True,
+                    apple_development=a.signing_mode == 'apple-development')
             else:
                 record['components'] = verify_app(app, I, native_arch)
             run('node', ROOT / 'build-support/check-package-licenses.mjs', app, 'macos-' + a.arch, cwd=ROOT)
@@ -388,7 +397,7 @@ def main():
             record['launch_smoke'].update(signed=True, backend=backend.relative_to(app).as_posix(),
                                          backend_sha256=digest(backend))
             if a.development_signing:
-                record['launch_smoke']['signing'] = 'ad-hoc'
+                record['launch_smoke']['signing'] = a.signing_mode
             app_notary = {'status': 'not-submitted'}
             if a.notary_profile:
                 submission = tmp / 'submission.zip'
@@ -409,8 +418,8 @@ def main():
             run('ditto', '-c', '-k', '--sequesterRsrc', '--keepParent', app, archive)
             record['notarization'] = {'app': app_notary, 'dmg': dmg_notary}
             record['notarized'] = app_notary.get('stapled', False) and dmg_notary.get('stapled', False)
-            record['team_id'] = None if a.development_signing else a.team
-            record['certificate_sha1'] = None if a.development_signing else a.identity
+            record['team_id'] = None if a.adhoc_signing else a.team
+            record['certificate_sha1'] = None if a.adhoc_signing else a.identity
             if a.development_signing:
                 record['app_group_namespace'] = a.team
             record['artifacts'] = [{'name': f.name, 'size': f.stat().st_size,

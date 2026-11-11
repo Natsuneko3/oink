@@ -146,8 +146,15 @@ gh workflow run custom-release.yml --repo Natsuneko3/oink --ref main \
   -f build=114 -f release_tag=v0.3.5-custom.1
 ```
 
-This path uses `--development-signing` for Mac, with ad-hoc signatures and no
-notarization. Windows MSI is unsigned by Authenticode. The distribution metadata
+This fork defaults to `--signing-mode apple-development` for local and GitHub Mac
+packages, using the pinned certificate and team in `packaging/identity.json`, without
+notarization. GitHub imports the password-protected identity from
+`MACOS_DEVELOPMENT_CERTIFICATE_P12` and `MACOS_DEVELOPMENT_CERTIFICATE_PASSWORD`
+in the `release` environment, verifies `MACOS_DEVELOPMENT_SIGNING_FINGERPRINT`,
+and always removes its temporary keychain. Private certificate material never
+belongs in source control. The explicit `--development-signing` flag retains the
+ad-hoc path for local diagnostics; current custom releases require the configured
+Apple Development identity. Windows MSI is unsigned by Authenticode. The distribution metadata
 explicitly records those facts, while Ed25519/Sparkle signatures still authenticate
 the exact update packages. It does not depend on an upstream Sentry project.
 The source archive comes from the exact Git commit built by the runners.
@@ -171,9 +178,9 @@ restores the prior hosted snapshot and retains consumed sequence reservations.
 Changing the update source does not provision native code-signing credentials.
 The existing production Mac pipeline requires Developer ID signing,
 notarization and signed native launch checks. Some existing package-verification
-code still pins Apple team `893V37X2CW`; using a different Apple developer team
-requires a separate, consistent product-signing migration before publishing Mac
-updates. Never remove those checks to make an unsigned package pass.
+checks use this fork's team `9559Z74J33`. The previous upstream App Group directory
+is preserved: changing signing teams does not migrate or delete existing local data.
+Apple Development does not satisfy Developer ID or notarization requirements. Never remove those checks to make an unsigned package pass.
 Windows Authenticode pins are additionally enforced if configured; the mandatory
 Ed25519 feed/package signatures remain required even without Authenticode pins.
 

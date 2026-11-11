@@ -40,3 +40,15 @@ def signpath_configuration():
 
 if __name__ == '__main__':
     (ROOT / '.signpath/artifact-configurations/windows-msi-v1.xml').write_bytes(signpath_configuration())
+
+
+def valid_development_identity(record):
+    """Match development release receipts to this fork's actual signing policy."""
+    mac = IDENTITY['macos']
+    mode = mac.get('signing_mode', 'ad-hoc')
+    if record.get('signing') != mode or record.get('development_signing') is not True:
+        return False
+    if mode == 'apple-development':
+        return (record.get('team_id') == mac['team_id'] and
+                record.get('certificate_sha1') == mac['signing_fingerprint'])
+    return mode == 'ad-hoc' and record.get('team_id') is None and record.get('certificate_sha1') is None

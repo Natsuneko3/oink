@@ -33,6 +33,7 @@ def main():
                    help='Portable source modes for an archive without a Git index')
     p.add_argument('--tool-cache', type=Path, default=Path.home() / '.cache/oink-build')
     p.add_argument('--signing-fingerprint', default=os.environ.get('MACOS_SIGNING_FINGERPRINT'), help='Optional SHA1 of an existing Developer ID certificate')
+    p.add_argument('--signing-mode', choices=['ad-hoc', 'apple-development', 'developer-id'])
     p.add_argument('--development-signing', action='store_true',
                    help='Mac development distribution: ad-hoc signing, without Developer ID or notarization')
     p.add_argument('--development-cross-compile', action='store_true',
@@ -43,10 +44,19 @@ def main():
     p.add_argument('--windows-update-test-fail-health', action='store_true', help='TEST ONLY: withhold candidate health proof for rollback qualification')
     p.add_argument('--run-native-tests', action='store_true', help='Run Windows C++/PowerShell tests explicitly')
     a = p.parse_args()
-    if a.development_signing and a.platform != 'macos':
+    if (a.development_signing or a.signing_mode) and a.platform != 'macos':
         p.error('development signing is only available for Mac packages')
-    if a.development_signing and (a.signing_fingerprint or a.notary_profile or a.notary_keychain):
-        p.error('development signing cannot use a Developer ID identity or notary credentials')
+    if a.platform == 'macos':
+        sys.path.insert(0, str(ROOT / 'packaging/macos'))
+        from signing import signing_configuration
+        try:
+            policy = signing_configuration(IDENTITY['macos'], mode=a.signing_mode,
+                development_signing=a.development_signing, fingerprint=a.signing_fingerprint,
+                notary_profile=a.notary_profile, notary_keychain=a.notary_keychain)
+        except ValueError as error:
+            p.error(str(error))
+        a.signing_mode, a.signing_fingerprint = policy['mode'], policy['fingerprint']
+        a.development_signing = a.signing_mode != 'developer-id'
     if a.development_cross_compile and not (
             a.platform == 'macos' and a.arch == 'arm64' and a.development_signing and
             platform.system() == 'Darwin' and platform.machine().lower() == 'x86_64'):
@@ -96,10 +106,10 @@ def main():
     (output / 'build-environment.json').write_text(json.dumps({**tools, 'version': version, 'source_commit': commit}, indent=2) + '\n')
     snapshot.write_text(json.dumps({'schema': 1, 'source_tree_sha256': tree, 'files': inventory}, indent=2) + '\n')
     macos = a.platform == 'macos'
-    if macos and not a.development_signing:
+    if macos and a.signing_mode != 'ad-hoc':
         sys.path.insert(0, str(ROOT / 'packaging/macos'))
         from signing import select_identity
-        a.signing_fingerprint = select_identity('893V37X2CW', a.signing_fingerprint)
+        a.signing_fingerprint = select_identity(IDENTITY['macos']['team_id'], a.signing_fingerprint, kind=a.signing_mode)
     target = ('aarch64-apple-darwin' if a.arch == 'arm64' else 'x86_64-apple-darwin') if macos else 'x86_64-pc-windows-msvc'
     common = ['--build', str(a.build), '--source-tree-sha256', tree]
     if commit:
@@ -118,8 +128,7 @@ def main():
                '--binaries', str(binaries), '--output', str(output), '--update-notes-file', str(notes_file), *common]
     if macos:
         command += ['--arch', a.arch, '--sparkle-cache', str(a.tool_cache), '--notary-timeout', str(a.notary_timeout)]
-        if a.development_signing:
-            command += ['--development-signing']
+        command += ['--signing-mode', a.signing_mode]
         if a.development_cross_compile:
             command += ['--development-cross-compile']
         for flag, value in [('--signing-fingerprint', a.signing_fingerprint),

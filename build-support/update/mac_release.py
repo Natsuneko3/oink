@@ -64,7 +64,7 @@ def validate_release(record, annotations, tag, commit, tree, platform="macos"):
     mac = record['platforms'][platform]
     feed.require(all(mac.get(k) == record[k] for k in ('version', 'build', 'built_commit', 'source_tree_sha256')) and
                  mac.get('source_commit') is None and mac['notarized'] is True and
-                 mac['team_id'] == '893V37X2CW' and
+                 mac['team_id'] == feed.read(feed.ROOT / 'packaging/identity.json')['macos']['team_id'] and
                  all(mac['notarization'][k]['status'] == 'Accepted' and mac['notarization'][k]['stapled'] is True
                      for k in ('app', 'dmg')) and
                  mac['launch_smoke']['status'] == 'passed' and mac['launch_smoke']['signed'] is True and
@@ -176,7 +176,7 @@ def candidate(state, output, cache, tag):
             feed.require(arches == [native_arch], 'archive_architecture')
             verify_update_transport(info)
             verify_imports([app], '14.2')
-            verify_published_app(app, '893V37X2CW')
+            verify_published_app(app, feed.read(feed.ROOT / 'packaging/identity.json')['macos']['team_id'])
             signer = prepare(cache) / 'bin/sign_update'
             signature = sign(signer, archive, config['mac']['public_key'])
             metadata = dict(architecture=architecture, build=record['build'], version=record['version'],

@@ -9,7 +9,7 @@ import shutil
 import subprocess
 import sys
 
-from identity import IDENTITY
+from identity import IDENTITY, valid_development_identity
 from provenance import ROOT, digest, source_tree_sha256
 
 REPOSITORY = 'Natsuneko3/oink'
@@ -46,8 +46,7 @@ def validate(record, platform, build, commit, source):
         suffixes = ['.msi']
     else:
         smoke = record.get('launch_smoke', {})
-        require(record.get('signing') == 'ad-hoc' and record.get('development_signing') is True and
-                record.get('notarized') is False and record.get('team_id') is None and
+        require(valid_development_identity(record) and record.get('notarized') is False and
                 smoke.get('signed') is True and record.get('sparkle', {}).get('public_key_configured') is True,
                 'explicit_unnotarized_development_package_required')
         cross_compile = record.get('development_cross_compile', False)
@@ -61,7 +60,7 @@ def validate(record, platform, build, commit, source):
                     record.get('target_architecture') == 'arm64' and
                     smoke.get('status') == 'not-run' and smoke.get('reason') == 'cross-compilation' and
                     type(smoke.get('seconds')) is int and smoke['seconds'] == 0 and
-                    smoke.get('signing') == 'ad-hoc' and
+                    smoke.get('signing') == record.get('signing') and
                     native_tests == {'status': 'not-run', 'reason': 'cross-compilation',
                                      'tests': ['loopback', 'driver-identity']} and
                     record.get('audio_plugin_install_permissions') == {'status': 'passed'} and

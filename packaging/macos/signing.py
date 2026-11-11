@@ -5,7 +5,9 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import tempfile
 import time
+import hashlib
 
 
 @contextmanager
@@ -38,31 +40,66 @@ def private_run(*args, check=True, timeout=None):
     return result
 
 
-def select_identity(team, fingerprint=None):
+def signing_configuration(mac, *, mode=None, development_signing=False, fingerprint=None,
+                          notary_profile=None, notary_keychain=None):
+    if development_signing and mode not in (None, 'ad-hoc'):
+        raise ValueError('Choose one signing mode')
+    mode = 'ad-hoc' if development_signing else mode or mac.get('signing_mode', 'developer-id')
+    if mode not in ('ad-hoc', 'apple-development', 'developer-id'):
+        raise ValueError('Unknown macOS signing mode')
+    if mode != 'developer-id' and (notary_profile or notary_keychain):
+        raise ValueError('Development signing cannot use notarization credentials')
+    if mode == 'ad-hoc' and fingerprint:
+        raise ValueError('Ad-hoc signing cannot use a signing certificate')
+    if mode == 'apple-development':
+        expected = mac.get('signing_fingerprint')
+        if not expected or (fingerprint and fingerprint.upper() != expected.upper()):
+            raise ValueError('Apple Development certificate must match the configured fingerprint')
+        fingerprint = expected.upper()
     if fingerprint and not re.fullmatch('[0-9A-Fa-f]{40}', fingerprint):
         raise ValueError('signing fingerprint must be a SHA1 certificate fingerprint')
+    return {'mode': mode, 'team': mac['team_id'], 'fingerprint': fingerprint}
+
+
+def select_identity(team, fingerprint=None, *, kind='developer-id'):
+    if fingerprint and not re.fullmatch('[0-9A-Fa-f]{40}', fingerprint):
+        raise ValueError('signing fingerprint must be a SHA1 certificate fingerprint')
+    prefix = {'developer-id': 'Developer ID Application:', 'apple-development': 'Apple Development:'}.get(kind)
+    if prefix is None:
+        raise ValueError('Unsupported signing certificate type')
     identities = private_run('security', 'find-identity', '-v', '-p', 'codesigning').stdout
     matches = []
     for sha, subject in re.findall(r'\b([A-Fa-f0-9]{40})\s+"([^"]+)"', identities):
-        if subject.startswith('Developer ID Application:') and subject.endswith(f'({team})'):
+        if subject.startswith(prefix) and subject.endswith(f'({team})'):
             if fingerprint is None or sha.upper() == fingerprint.upper():
                 matches.append(sha.upper())
     if len(matches) != 1:
-        raise RuntimeError('Expected one existing Developer ID Application certificate for the configured Team ID; select its fingerprint explicitly if needed')
+        raise RuntimeError('Expected one existing ' + prefix.rstrip(':') + ' certificate for the configured Team ID; select its fingerprint explicitly if needed')
     return matches[0]
 
 
-def verify_signature(path, team, *, development_signing=False):
+def verify_signature(path, team, *, development_signing=False, apple_development=False, fingerprint=None):
     private_run('codesign', '--verify', '--strict', '--deep', path)
     details = private_run('codesign', '-dvv', path).stderr
-    if development_signing:
+    if apple_development:
+        if ('Authority=Apple Development:' not in details or
+                f'TeamIdentifier={team}' not in details.splitlines()):
+            raise RuntimeError('Apple Development signature or Team ID verification failed')
+    elif development_signing:
         if ('Signature=adhoc' not in details or 'Authority=' in details or
                 ('TeamIdentifier=' in details and 'TeamIdentifier=not set' not in details)):
             raise RuntimeError('Ad-hoc development signature verification failed')
         return
-    if ('Authority=Developer ID Application:' not in details or f'TeamIdentifier={team}' not in details
+    elif ('Authority=Developer ID Application:' not in details or f'TeamIdentifier={team}' not in details
             or 'Timestamp=' not in details or 'runtime' not in details):
         raise RuntimeError('Developer ID, hardened runtime, Team ID and secure timestamp verification failed')
+    if fingerprint:
+        with tempfile.TemporaryDirectory(prefix='oink-signature-') as directory:
+            prefix = Path(directory) / 'certificate'
+            private_run('codesign', '-d', '--extract-certificates', prefix, path)
+            certificate = Path(str(prefix) + '0')
+            if not certificate.is_file() or hashlib.sha1(certificate.read_bytes()).hexdigest().upper() != fingerprint.upper():
+                raise RuntimeError('Signing certificate fingerprint mismatch')
 
 
 def verify_published_app(app, team):

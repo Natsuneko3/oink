@@ -30,7 +30,7 @@ def main():
     record = json.loads((directory / 'release.json').read_text())
     if source_tree_sha256(ROOT) != record['source_tree_sha256']:
         p.error('run from the source tree recorded in the signed package')
-    if record['signing'] != 'developer-id' or record['team_id'] != '893V37X2CW':
+    if record['signing'] != 'developer-id' or record['team_id'] != json.loads((Path(__file__).parents[1] / 'identity.json').read_text())['macos']['team_id']:
         p.error('expected the signed Oink Developer ID package')
     for artifact in record['artifacts']:
         path = directory / artifact['name']

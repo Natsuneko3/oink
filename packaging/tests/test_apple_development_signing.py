@@ -1,5 +1,7 @@
 """A fork signing identity must be selected and verified without weakening distribution checks."""
+import copy
 import importlib.util
+import sys
 from pathlib import Path
 import subprocess
 import unittest
@@ -53,6 +55,21 @@ class AppleDevelopmentSigning(unittest.TestCase):
         with patch.object(S, 'private_run', return_value=subprocess.CompletedProcess([], 0, '', details)):
             with self.assertRaises(RuntimeError):
                 S.verify_signature(Path('Oink.app'), TEAM)
+
+
+class DevelopmentReceipts(unittest.TestCase):
+    def test_only_configured_team_and_certificate_can_be_published(self):
+        sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'build-support'))
+        from identity import IDENTITY, valid_development_identity
+        mac = IDENTITY['macos']
+        receipt = {'signing': 'apple-development', 'development_signing': True,
+                   'team_id': mac['team_id'], 'certificate_sha1': mac['signing_fingerprint']}
+        self.assertTrue(valid_development_identity(receipt))
+        for key, value in [('team_id', 'OTHERTEAM0'), ('certificate_sha1', 'F' * 40),
+                           ('signing', 'ad-hoc'), ('development_signing', False)]:
+            invalid = {**receipt, key: value}
+            with self.subTest(field=key):
+                self.assertFalse(valid_development_identity(invalid))
 
 
 if __name__ == '__main__':
