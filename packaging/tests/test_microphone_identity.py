@@ -54,7 +54,7 @@ class MicrophoneIdentity(unittest.TestCase):
         commands = root / 'bin'; commands.mkdir()
         # Only the fixture's command shims can perform installer side effects.
         for name, body in {
-            'codesign': 'exit 9' if fail_verification else 'echo TeamIdentifier=9559Z74J33 >&2',
+            'codesign': 'exit 9' if fail_verification else 'echo TeamIdentifier=D765989V7S >&2',
             'chown': ':',
             'ditto': '/bin/cp -R "$1" "$2"',
             'killall': 'echo "$*" >> "'+str(root / 'restarts')+'"',

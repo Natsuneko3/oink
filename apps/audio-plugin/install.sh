@@ -34,7 +34,7 @@ case "$mode" in
     codesign --verify --strict "$source_bundle"
     [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$source_bundle/Contents/Info.plist")" == com.hachiwii.oink.microphone.driver ]] || exit 2
     # Read all output: grep -q can give codesign SIGPIPE after a match under pipefail.
-    codesign -dv --verbose=2 "$source_bundle" 2>&1 | /usr/bin/grep -x 'TeamIdentifier=9559Z74J33' >/dev/null || { echo 'Unexpected signing team' >&2; exit 2; }
+    codesign -dv --verbose=2 "$source_bundle" 2>&1 | /usr/bin/grep -x 'TeamIdentifier=D765989V7S' >/dev/null || { echo 'Unexpected signing team' >&2; exit 2; }
     ;;
   uninstall) ;;
   *) echo 'Usage: install.sh install <bundle> | uninstall' >&2; exit 2 ;;
@@ -55,7 +55,7 @@ for previous in "$destination" "$legacy_destination"; do
     [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$previous/Contents/Info.plist")" == "$identifier" ]] || { echo 'Unexpected installed microphone bundle ID' >&2; exit 2; }
     # Existing Oink drivers may carry the previous upstream team's signature.
     # This migration exception never applies to the new source payload.
-    team_requirement='(certificate leaf[subject.OU] = "9559Z74J33" or certificate leaf[subject.OU] = "893V37X2CW")'
+    team_requirement='(certificate leaf[subject.OU] = "D765989V7S" or certificate leaf[subject.OU] = "893V37X2CW")'
     if [[ "$previous" == "$legacy_destination" ]]; then
       team_requirement='certificate leaf[subject.OU] = "893V37X2CW"'
     fi

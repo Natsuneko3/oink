@@ -178,7 +178,7 @@ restores the prior hosted snapshot and retains consumed sequence reservations.
 Changing the update source does not provision native code-signing credentials.
 The existing production Mac pipeline requires Developer ID signing,
 notarization and signed native launch checks. Some existing package-verification
-checks use this fork's team `9559Z74J33`. The previous upstream App Group directory
+checks use this fork's team `D765989V7S`. The previous upstream App Group directory
 is preserved: changing signing teams does not migrate or delete existing local data.
 Apple Development does not satisfy Developer ID or notarization requirements. Never remove those checks to make an unsigned package pass.
 Windows Authenticode pins are additionally enforced if configured; the mandatory

@@ -65,7 +65,7 @@ int main(int argc,const char **argv) {
         [drag.draggingPasteboard releaseGlobally];
         const char *app=argv[1];
         if (oink_local_verify_app(app)!=0) {puts("genuine reference rejected");return 1;}
-        NSString *wrongTeam=[identityRequirement stringByReplacingOccurrencesOfString:@"9559Z74J33" withString:@"0000000000"];
+        NSString *wrongTeam=[identityRequirement stringByReplacingOccurrencesOfString:@"D765989V7S" withString:@"0000000000"];
         if (verifyIdentity(app,wrongTeam)!=1) return 3;
         NSString *wrongProduct=[identityRequirement stringByReplacingOccurrencesOfString:@"com.hachiwii.oink" withString:@"com.example.other"];
         if (verifyIdentity(app,wrongProduct)!=1) return 4;

@@ -9,8 +9,9 @@ from unittest.mock import patch
 SPEC = importlib.util.spec_from_file_location('apple_development_signing', Path(__file__).parents[1] / 'macos/signing.py')
 S = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(S)
-TEAM = '9559Z74J33'
-FINGERPRINT = 'A' * 40
+TEAM = 'CORPTEAM01'
+FINGERPRINT = '0473FF860D7216C626F5F75F66FFE55D82DC24B2'
+CERTIFICATE_PEM = '-----BEGIN CERTIFICATE-----\nMIIDMDCCAhgCCQDSIWqxje6HkzANBgkqhkiG9w0BAQsFADBaMTAwLgYDVQQDDCdB\ncHBsZSBEZXZlbG9wbWVudDogRml4dHVyZSAoUEVSU09OQUwwMSkxEzARBgNVBAsM\nCkNPUlBURUFNMDExETAPBgNVBAoMCFRlc3RPbmx5MB4XDTI2MTExMTEzMzc0MFoX\nDTM2MTEwODEzMzc0MFowWjEwMC4GA1UEAwwnQXBwbGUgRGV2ZWxvcG1lbnQ6IEZp\neHR1cmUgKFBFUlNPTkFMMDEpMRMwEQYDVQQLDApDT1JQVEVBTTAxMREwDwYDVQQK\nDAhUZXN0T25seTCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBAOKhxcYb\nwwzBp1Ay4ekv4Jy+Xy/+tj0+pph+WQiiln2LtdMz1khnAcYbHeaiEnpYtM6LNU4R\nRW1ULjIJZLy7X6OtWnFrKsPsklg/nfGIU5FUL0YaZLAWf6vCSVNfrizezDU+ecEL\nqeW20BsDpw3QpUy2ktWCv3B9nSpv0ZXp3oO2Aos2XM52HYlA4Zi0CDOqSi3GRZZI\nVQass4LbZGO0xUwGwX5lqBHaK6Y9v8p3dBQHXqLdiiSwpGih149S5u+lNLzPOGpp\nAcm7CLkkSUlv4wN6tzBBu1xtNfJWmMopsfj2STfuIoZTLjyLL36qTBrOPIoCkvGY\nL/dDiBsxekps/JECAwEAATANBgkqhkiG9w0BAQsFAAOCAQEA4IzfVxDC7K28ebu9\n1T74RijkWWDjqCKSJKzcmmV0L04LODL/QBsxH7oBuZM8/es9RtVB6Et2uc3Cquqg\n9k5Lf3u+999cJj4W4Vig5V/M8Iq2hi38B/yyF5Z7EFmAJgImKaweJlzKDQbr91Gh\n3XjfGA0K9MByUKLW5VHSLcXMvAfMTIcNVUofff2FJtcpdkdyAek4q3xAd+yjNYBb\neJ0wtJyrllwiLZPoI/9fHzOUB6HaqFmjjvpUk1asrAFMD94XW8iDWm5AEtTkQzW0\n/C/tsTp93ad3YJKq8GSbey/DI/Y0D7dCw6Ps30G1+z5CRZ3rQKgspCkz/BT9nJPR\niBXuGw==\n-----END CERTIFICATE-----\n'
 MAC = {'team_id': TEAM, 'signing_mode': 'apple-development', 'signing_fingerprint': FINGERPRINT}
 
 
@@ -28,19 +29,26 @@ class AppleDevelopmentSigning(unittest.TestCase):
             with self.subTest(options=options), self.assertRaises(ValueError):
                 S.signing_configuration(MAC, **options)
 
-    def test_development_selection_rejects_wrong_type_team_and_fingerprint(self):
+    def test_development_selection_uses_certificate_ou_and_rejects_wrong_identity(self):
         entries = '\n'.join([
-            f'1) {FINGERPRINT} "Apple Development: Fixture ({TEAM})"',
+            f'1) {FINGERPRINT} "Apple Development: Fixture (PERSONAL01)"',
             f'2) {"B" * 40} "Developer ID Application: Fixture ({TEAM})"',
-            f'3) {"C" * 40} "Apple Development: Fixture (OTHERTEAM0)"'])
-        with patch.object(S, 'private_run', return_value=subprocess.CompletedProcess([], 0, entries, '')):
+            f'3) {"C" * 40} "Apple Development: Other ({TEAM})"'])
+        original = S.private_run
+        def external(*args, **kwargs):
+            if args[:2] == ('security', 'find-identity'):
+                return subprocess.CompletedProcess([], 0, entries, '')
+            if args[:2] == ('security', 'find-certificate'):
+                return subprocess.CompletedProcess([], 0, CERTIFICATE_PEM, '')
+            return original(*args, **kwargs)
+        with patch.object(S, 'private_run', side_effect=external):
             self.assertEqual(S.select_identity(TEAM, FINGERPRINT, kind='apple-development'), FINGERPRINT)
-            for fingerprint in ('B' * 40, 'C' * 40):
-                with self.assertRaises(RuntimeError):
-                    S.select_identity(TEAM, fingerprint, kind='apple-development')
+            for team, fingerprint in [(TEAM, 'B' * 40), ('OTHERTEAM0', FINGERPRINT), (TEAM, 'C' * 40)]:
+                with self.subTest(team=team, fingerprint=fingerprint), self.assertRaises(RuntimeError):
+                    S.select_identity(team, fingerprint, kind='apple-development')
 
     def test_development_verification_requires_apple_authority_and_exact_team(self):
-        good = f'Authority=Apple Development: Fixture ({TEAM})\nTeamIdentifier={TEAM}\n'
+        good = f'Authority=Apple Development: Fixture (PERSONAL01)\nTeamIdentifier={TEAM}\n'
         with patch.object(S, 'private_run', return_value=subprocess.CompletedProcess([], 0, '', good)):
             S.verify_signature(Path('Oink.app'), TEAM, apple_development=True)
         for details in ('Signature=adhoc\nTeamIdentifier=not set\n', good.replace(TEAM, 'OTHERTEAM0'),

@@ -203,11 +203,11 @@ mod macos {
     const LEGACY_DESTINATION: &str = "/Library/Audio/Plug-Ins/HAL/AcrossMicrophone.driver";
     const LEGACY_PLUGIN_REQUIREMENT: &str = "=identifier \"com.across.microphone.driver\" and anchor apple generic and certificate leaf[subject.OU] = \"893V37X2CW\"";
     const REQUIREMENT: &str =
-        "=identifier \"com.hachiwii.oink\" and anchor apple generic and certificate leaf[subject.OU] = \"9559Z74J33\"";
-    const PLUGIN_REQUIREMENT: &str = "=identifier \"com.hachiwii.oink.microphone.driver\" and anchor apple generic and certificate leaf[subject.OU] = \"9559Z74J33\"";
+        "=identifier \"com.hachiwii.oink\" and anchor apple generic and certificate leaf[subject.OU] = \"D765989V7S\"";
+    const PLUGIN_REQUIREMENT: &str = "=identifier \"com.hachiwii.oink.microphone.driver\" and anchor apple generic and certificate leaf[subject.OU] = \"D765989V7S\"";
     // Migration-only trust for an already installed Oink driver; bundled payloads
     // must still satisfy the current-team-only PLUGIN_REQUIREMENT above.
-    const INSTALLED_PLUGIN_REQUIREMENT: &str = "=identifier \"com.hachiwii.oink.microphone.driver\" and anchor apple generic and (certificate leaf[subject.OU] = \"9559Z74J33\" or certificate leaf[subject.OU] = \"893V37X2CW\")";
+    const INSTALLED_PLUGIN_REQUIREMENT: &str = "=identifier \"com.hachiwii.oink.microphone.driver\" and anchor apple generic and (certificate leaf[subject.OU] = \"D765989V7S\" or certificate leaf[subject.OU] = \"893V37X2CW\")";
     const BOOTSTRAP: &str = include_str!("../../../apps/audio-plugin/privileged-bootstrap.sh");
     const AUTHORIZATION_SCRIPT: &str = "on run argv\n do shell script (item 1 of argv) with administrator privileges with prompt \"Oink needs administrator authorization to install or remove its virtual microphone. System audio and calls will briefly stop.\"\nend run";
     static OPERATION: AtomicU8 = AtomicU8::new(0);

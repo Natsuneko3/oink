@@ -1,6 +1,7 @@
 """Developer ID selection and notarization with no certificate subject output."""
 from contextlib import contextmanager
 import json
+import base64
 import hashlib
 import os
 from pathlib import Path
@@ -31,8 +32,8 @@ def awake_for_signing():
                 awake.wait()
 
 
-def private_run(*args, check=True, timeout=None):
-    result = subprocess.run([str(arg) for arg in args], capture_output=True, text=True, timeout=timeout)
+def private_run(*args, check=True, timeout=None, input=None):
+    result = subprocess.run([str(arg) for arg in args], capture_output=True, text=True, timeout=timeout, input=input)
     if check and result.returncode:
         # Security/codesign/notary output can contain personal certificate data.
         # Keep it in memory; errors identify the operation without echoing it.
@@ -61,6 +62,21 @@ def signing_configuration(mac, *, mode=None, development_signing=False, fingerpr
     return {'mode': mode, 'team': mac['team_id'], 'fingerprint': fingerprint}
 
 
+def certificate_team(subject, fingerprint):
+    """Development certificate CN suffixes identify accounts, not signing teams."""
+    certificates = private_run('security', 'find-certificate', '-a', '-c', subject, '-p').stdout
+    for pem in re.findall(r'-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----', certificates, re.DOTALL):
+        encoded = pem.removeprefix('-----BEGIN CERTIFICATE-----').removesuffix('-----END CERTIFICATE-----')
+        der = base64.b64decode(encoded)
+        if hashlib.sha1(der).hexdigest().upper() != fingerprint.upper():
+            continue
+        details = private_run('openssl', 'x509', '-noout', '-subject', '-nameopt', 'RFC2253', input=pem).stdout
+        distinguished_name = details.removeprefix('subject=').strip()
+        match = re.search(r'(?:^|,)OU=([A-Z0-9]{10})(?:,|$)', distinguished_name)
+        return match.group(1) if match else None
+    return None
+
+
 def select_identity(team, fingerprint=None, *, kind='developer-id'):
     if fingerprint and not re.fullmatch('[0-9A-Fa-f]{40}', fingerprint):
         raise ValueError('signing fingerprint must be a SHA1 certificate fingerprint')
@@ -70,9 +86,11 @@ def select_identity(team, fingerprint=None, *, kind='developer-id'):
     identities = private_run('security', 'find-identity', '-v', '-p', 'codesigning').stdout
     matches = []
     for sha, subject in re.findall(r'\b([A-Fa-f0-9]{40})\s+"([^"]+)"', identities):
-        if subject.startswith(prefix) and subject.endswith(f'({team})'):
-            if fingerprint is None or sha.upper() == fingerprint.upper():
-                matches.append(sha.upper())
+        if not subject.startswith(prefix) or (fingerprint and sha.upper() != fingerprint.upper()):
+            continue
+        actual_team = certificate_team(subject, sha) if kind == 'apple-development' else None
+        if (actual_team == team if kind == 'apple-development' else subject.endswith(f'({team})')):
+            matches.append(sha.upper())
     if len(matches) != 1:
         raise RuntimeError('Expected one existing ' + prefix.rstrip(':') + ' certificate for the configured Team ID; select its fingerprint explicitly if needed')
     return matches[0]

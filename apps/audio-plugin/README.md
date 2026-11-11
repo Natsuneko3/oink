@@ -17,7 +17,7 @@ falls back to legacy UIDs. See `docs/design/mic-plugin-installation.md`.
 loopback and identity tests. The identity test loads the driver into its own
 process, without HAL registration or StartIO. Neither test installs anything.
 `packaging/macos/build.py` builds this component and signs it using the existing
-Developer ID Application flow (team `9559Z74J33`), before signing the outer app.
+Developer ID Application flow (team `D765989V7S`), before signing the outer app.
 The pinned libASPL dependency and all three upstream license texts are recorded
 in the native license inventory.
 
