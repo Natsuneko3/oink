@@ -981,6 +981,7 @@ fn game_relative_motion_bypasses_device_screen_mode_and_remote_gains() {
             mode: GameMode::On,
             detected: false,
             active: true,
+            local_input: false,
             cursor_hiding_cause_available: None,
         }),
         2,

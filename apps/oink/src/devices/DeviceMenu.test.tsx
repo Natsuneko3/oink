@@ -31,6 +31,19 @@ function menu(props: Partial<SideContextMenuProps> & { target: string }) {
 }
 const items = async () => [...(await screen.findByRole('menu')).querySelectorAll('[role^="menuitem"]')].map(i => i.textContent);
 
+it.each([false, true])('offers a saved local-input game switch on this device (%s)', async enabled => {
+  const onGameModeLocalInput = vi.fn();
+  menu({ target: 'device:remote', devices: [{ ...remote, group: 'self' }],
+    gameModeLocalInput: enabled, onGameModeLocalInput });
+  const game = await screen.findByRole('menuitem', { name: 'Game mode' });
+  game.focus();
+  fireEvent.keyDown(game, { key: 'ArrowRight' });
+  const toggle = await screen.findByRole('menuitemcheckbox', { name: 'Keep keyboard and mouse local in game mode' });
+  expect(toggle.getAttribute('aria-checked')).toBe(String(enabled));
+  fireEvent.click(toggle);
+  expect(onGameModeLocalInput).toHaveBeenCalledExactlyOnceWith(!enabled);
+});
+
 it.each(['request', 'nearby'] as const)('blocks the selected %s without starting or rejecting a pair', async kind => {
   const peer = { id: kind === 'request' ? 'pair-id' : 'peer-id', device: 'peer-id',
     compatible: true, name: 'Peer', os: 'win' as const, ip: '', port: 47470, deviceId: 'fingerprint',

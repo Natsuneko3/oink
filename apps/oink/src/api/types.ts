@@ -202,6 +202,8 @@ export interface InputSettings {
   forward_wheel_by_lines?: boolean;
   /** Windows capture-local opt-in; false keeps other apps' injected input local. */
   forward_injected_input: boolean;
+  /** This device's optional local keyboard/mouse policy while hosting game mode. */
+  game_mode_local_input?: boolean;
   take_foreground_on_leave: boolean;
   /** Windows device-local Quicker compatibility mode (remote mouse buttons injected untagged). */
   quicker_compat?: boolean;

@@ -112,6 +112,7 @@ pub enum ControlMsg {
         detected: bool,
         active: bool,
         cursor_hiding_cause_available: Option<bool>,
+        local_input: bool,
     },
     SetGameMode {
         epoch: u64,

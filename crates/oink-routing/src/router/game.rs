@@ -1,5 +1,5 @@
-//! Device-owned game mode with focus-scoped relative input. Only a held escape
-//! key plus fresh native edge evidence invokes normal crossing geometry.
+//! Device-owned game mode uses relative input by default. Its optional local
+//! input policy keeps every participant's keyboard and mouse on its own device.
 use super::*;
 pub use crate::control::GameMode;
 use serde::{Deserialize, Serialize};
@@ -11,6 +11,8 @@ pub struct GameModeStatus {
     pub mode: GameMode,
     pub detected: bool,
     pub active: bool,
+    #[serde(default)]
+    pub local_input: bool,
     /// Current holder: None until sampled; false when the hiding cause is unavailable.
     /// Informational only: Auto then uses visibility/motion evidence, not this flag.
     pub cursor_hiding_cause_available: Option<bool>,
@@ -24,6 +26,7 @@ pub(super) struct GameState {
     pub(super) owner: OwnerGameState,
     detected: bool,
     active: bool,
+    local_input: bool,
     cursor_hiding_cause_available: Option<bool>,
     generation: u64,
     authority_generation: u64,
@@ -44,9 +47,10 @@ pub(super) struct OwnerGameState {
 }
 
 impl GameState {
-    pub(super) fn for_owner(mode: GameMode) -> Self {
+    pub(super) fn for_owner(mode: GameMode, local_input: bool) -> Self {
         Self {
             mode,
+            local_input,
             owner: OwnerGameState {
                 mode,
                 active: mode == GameMode::On,
@@ -72,6 +76,7 @@ impl Router {
             mode: self.game.mode,
             detected: self.game.detected,
             active: self.game.active && !self.paused,
+            local_input: self.game.local_input,
             cursor_hiding_cause_available: self.game.cursor_hiding_cause_available,
         }
     }
@@ -109,6 +114,14 @@ impl Router {
             self.refresh_game();
         } else {
             self.refresh_owner_game();
+        }
+    }
+
+    pub(super) fn refresh_game_input_policy(&mut self) {
+        // Changing isolation must preserve a manual override and Auto's capture
+        // evidence. While away, the current holder still owns the shared policy.
+        if self.holder == self.me() {
+            self.refresh_game();
         }
     }
 
@@ -173,6 +186,11 @@ impl Router {
     fn emit_game_status(&mut self) {
         let status = self.game_mode();
         if self.last_game_status.as_ref() != Some(&status) {
+            if self.last_game_status.as_ref().is_some_and(|previous| {
+                (previous.active && previous.local_input) != (status.active && status.local_input)
+            }) {
+                self.apply_game_input_mode(status.active && status.local_input);
+            }
             self.last_game_status = Some(status.clone());
             self.out.push(Output::Status(StatusEvent::GameMode(status)));
         }
@@ -199,8 +217,9 @@ impl Router {
         self.game.detected = self.game.owner.passive_detected || self.game.owner.remote_capture.detected;
         self.game.cursor_hiding_cause_available = self.game.owner.cursor_hiding_cause_available;
         let active = self.game.owner.active;
-        if self.game.active != active {
+        if self.game.active != active || self.game.local_input != self.cfg.settings.game_mode_local_input {
             self.game.active = active;
+            self.game.local_input = self.cfg.settings.game_mode_local_input;
             self.game.authority_generation += 1;
             self.game.generation = self.game.authority_generation;
             self.game.tx = (0, 0., 0.);
@@ -251,6 +270,7 @@ impl Router {
                 owner: std::mem::take(&mut self.game.owner),
                 mode,
                 active: !self.paused && mode == GameMode::On,
+                local_input: self.holder == self.me() && self.cfg.settings.game_mode_local_input,
                 authority_generation,
                 generation: if self.holder == self.me() {
                     authority_generation
@@ -287,6 +307,7 @@ impl Router {
             detected: self.game.detected,
             active: self.game.active,
             cursor_hiding_cause_available: self.game.cursor_hiding_cause_available,
+            local_input: self.game.local_input,
         })
     }
 
@@ -301,6 +322,7 @@ impl Router {
                     detected: self.game.detected,
                     active: self.game.active,
                     cursor_hiding_cause_available: self.game.cursor_hiding_cause_available,
+                    local_input: self.game.local_input,
                 }),
             );
         }
@@ -316,6 +338,7 @@ impl Router {
         detected: bool,
         active: bool,
         cursor_hiding_cause_available: Option<bool>,
+        local_input: bool,
     ) {
         if from != self.holder || from == self.me() || epoch != self.epoch || generation < self.game.generation {
             return;
@@ -329,6 +352,7 @@ impl Router {
         self.game.mode = mode;
         self.game.detected = detected;
         self.game.active = active;
+        self.game.local_input = local_input;
         self.game.cursor_hiding_cause_available = cursor_hiding_cause_available;
         self.emit_game_status();
     }
@@ -370,6 +394,7 @@ impl Router {
         // Relative packets never migrate to another focus/generation or get forwarded.
         if self.holder != self.me()
             || self.claim != self.me()
+            || self.game_input_local()
             || !self.game_mode().active
             || epoch != self.epoch
             || generation != self.game.generation
@@ -836,6 +861,7 @@ mod connection_tests {
                 mode: GameMode::On,
                 active: true,
                 detected: true,
+                local_input: false,
                 cursor_hiding_cause_available: Some(true),
             }),
             2,

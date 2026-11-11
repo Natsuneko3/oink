@@ -55,6 +55,7 @@ export interface Prefs {
     nativeMultifinger: boolean;
     macScrollFeel: boolean;
     forwardInjectedInput: boolean;
+    gameModeLocalInput: boolean;
     takeForegroundOnLeave: boolean;
     quickerCompat: boolean;
     syncUnlock: boolean;
@@ -95,6 +96,7 @@ export const DEFAULT_PREFS: Prefs = {
     nativeMultifinger: true,
     macScrollFeel: true,
     forwardInjectedInput: true,
+    gameModeLocalInput: false,
     takeForegroundOnLeave: false,
     quickerCompat: false,
     syncUnlock: false,

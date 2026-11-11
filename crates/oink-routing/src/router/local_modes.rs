@@ -31,14 +31,25 @@ pub struct SourceDecision {
     pub swallowed: bool,
 }
 impl Router {
+    pub fn game_input_local(&self) -> bool {
+        let game = self.game_mode();
+        game.active && game.local_input
+    }
+    fn effective_input_mode(&self, mode: InputMode) -> InputMode {
+        if mode == InputMode::Shared && self.game_input_local() {
+            InputMode::Local
+        } else {
+            mode
+        }
+    }
     pub fn mouse_local(&self) -> bool {
-        self.cfg.settings.mouse_mode == InputMode::Local
+        self.effective_input_mode(self.cfg.settings.mouse_mode) == InputMode::Local
     }
     pub fn mouse_disabled(&self) -> bool {
         self.cfg.settings.mouse_mode == InputMode::Disabled
     }
     pub fn keyboard_local(&self) -> bool {
-        self.cfg.settings.keyboard_mode == InputMode::Local
+        self.effective_input_mode(self.cfg.settings.keyboard_mode) == InputMode::Local
     }
     /// A parked cursor has no usable event position. Restore from the remembered
     /// local position, applying the first physical motion there instead of letting
@@ -168,57 +179,101 @@ impl Router {
     pub(super) fn apply_source_modes(&mut self, mouse: InputMode, keyboard: InputMode) {
         if keyboard != self.cfg.settings.keyboard_mode {
             let was_disabled = self.keyboard_disabled();
-            self.retire_source_keyboard();
+            if self.effective_input_mode(keyboard) != self.effective_input_mode(self.cfg.settings.keyboard_mode) {
+                self.retire_source_keyboard();
+            }
             self.cfg.settings.keyboard_mode = keyboard;
             if was_disabled || keyboard == InputMode::Disabled {
                 self.keyboard_mode_changed(keyboard == InputMode::Disabled);
             }
         }
-        if mouse != self.cfg.settings.mouse_mode {
-            self.keyboard.cancel_injected_release_hold();
-            self.local_click_cancel_own();
-            self.out
-                .push(Output::Status(StatusEvent::MouseDisabled(mouse == InputMode::Disabled)));
-            if mouse != InputMode::Disabled {
-                self.local_mouse_hidden = false;
+        if self.effective_input_mode(mouse) != self.effective_input_mode(self.cfg.settings.mouse_mode) {
+            self.apply_mouse_mode(self.effective_input_mode(mouse));
+        }
+    }
+
+    /// Temporary game policy never changes the saved modes or the group focus,
+    /// which also drives clipboard and other independent sharing features.
+    pub(super) fn apply_game_input_mode(&mut self, active: bool) {
+        if self.cfg.settings.keyboard_mode == InputMode::Shared
+            && (self.holder != self.me()
+                || self
+                    .keys
+                    .values()
+                    .flatten()
+                    .any(|target| matches!(target, Target::Remote(_))))
+        {
+            self.retire_source_keyboard();
+        }
+        if self.cfg.settings.mouse_mode == InputMode::Shared
+            && (self.holder != self.me()
+                || self.local_mouse_hidden
+                || self.buttons.values().any(|target| matches!(target, Target::Remote(_))))
+        {
+            self.apply_mouse_mode(if active { InputMode::Local } else { InputMode::Shared });
+        }
+        if active {
+            self.cancel_system_clip_motion();
+            self.gap_cancel();
+            self.local_click_cancel();
+            self.retire_received_multifinger();
+            let origins: Vec<_> = self.held.keys().copied().filter(|d| *d != self.me()).collect();
+            for origin in origins {
+                self.release_origin(origin);
             }
-            // End only drags controlled by this physical source. A different
-            // source's drag hosted on this device remains independent.
-            self.dnd_retire_physical_mouse();
-            self.cancel_source_contacts();
-            let buttons: Vec<_> = self.buttons.drain().collect();
-            for (button, target) in buttons {
-                if self.release_local_button(button, target) && !self.button_refs.contains_key(&button) {
-                    self.out
-                        .push(Output::Inject(InjectEvent::Button { button, pressed: false }));
-                }
-                self.buttons.insert(button, Target::Dropped);
+            let forwarded: Vec<_> = self.forwarded.keys().copied().collect();
+            for (origin, item) in forwarded {
+                self.release_press(origin, item);
             }
-            self.cancel_source_scroll();
-            // A phased gesture must not become a new gesture on another target.
-            self.cancel_local_gesture();
-            if (self.holder != self.me() || self.gap.is_some()) && !self.fully_paused {
-                if mouse == InputMode::Local {
-                    // The group pointer has no position on this machine. Restore
-                    // the last local position, rather than its hidden park point,
-                    // so the user's first local motion starts where they left it.
-                    if let Some(p) = self
-                        .local_cursor
-                        .as_ref()
-                        .or(self.exit_point.as_ref())
-                        .cloned()
-                        .or_else(|| self.display_center())
-                    {
-                        self.out.push(Output::RestoreLocal { at: p.local });
-                    } else {
-                        self.out.push(Output::SetMode(CaptureMode::Local));
-                    }
-                } else if mouse == InputMode::Shared {
-                    self.exit_point = self.local_cursor.clone();
-                    self.out.push(Output::SetMode(CaptureMode::Remote {
-                        park: self.park_point(),
-                    }));
+            self.scroll_fwd.clear();
+            self.gesture_fwd.clear();
+        }
+    }
+
+    fn apply_mouse_mode(&mut self, mouse: InputMode) {
+        self.keyboard.cancel_injected_release_hold();
+        self.local_click_cancel_own();
+        self.out
+            .push(Output::Status(StatusEvent::MouseDisabled(mouse == InputMode::Disabled)));
+        if mouse != InputMode::Disabled {
+            self.local_mouse_hidden = false;
+        }
+        // End only drags controlled by this physical source. A different
+        // source's drag hosted on this device remains independent.
+        self.dnd_retire_physical_mouse();
+        self.cancel_source_contacts();
+        let buttons: Vec<_> = self.buttons.drain().collect();
+        for (button, target) in buttons {
+            if self.release_local_button(button, target) && !self.button_refs.contains_key(&button) {
+                self.out
+                    .push(Output::Inject(InjectEvent::Button { button, pressed: false }));
+            }
+            self.buttons.insert(button, Target::Dropped);
+        }
+        self.cancel_source_scroll();
+        // A phased gesture must not become a new gesture on another target.
+        self.cancel_local_gesture();
+        if (self.holder != self.me() || self.gap.is_some()) && !self.fully_paused {
+            if mouse == InputMode::Local {
+                // The group pointer has no position on this machine. Restore
+                // the last local position, rather than its hidden park point,
+                // so the user's first local motion starts where they left it.
+                if let Some(p) = self
+                    .local_cursor
+                    .as_ref()
+                    .or(self.exit_point.as_ref())
+                    .cloned()
+                    .or_else(|| self.display_center())
+                {
+                    self.out.push(Output::RestoreLocal { at: p.local });
+                } else {
+                    self.out.push(Output::SetMode(CaptureMode::Local));
                 }
+            } else if mouse == InputMode::Shared {
+                self.exit_point = self.local_cursor.clone();
+                self.out.push(Output::SetMode(CaptureMode::Remote {
+                    park: self.park_point(),
+                }));
             }
         }
     }

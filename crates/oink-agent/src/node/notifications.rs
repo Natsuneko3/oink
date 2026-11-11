@@ -1162,6 +1162,7 @@ mod tests {
                         mode: GameMode::On,
                         detected: false,
                         active,
+                        local_input: false,
                         cursor_hiding_cause_available: None,
                     }),
                     2,

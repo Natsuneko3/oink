@@ -141,6 +141,7 @@ impl Router {
     }
     pub(super) fn local_click_event(&mut self, ev: &CapturedEvent, woke: bool) {
         if !self.mouse_local()
+            || self.game_input_local()
             || !ev.physical
             || !matches!(ev.event, InputEvent::Button { pressed: true, .. })
             || (self.holder == self.me()
@@ -256,7 +257,7 @@ impl Router {
                     return;
                 }
                 if !self.local_click.pending.contains_key(&key) {
-                    if self.dnd_pointer_active() || self.local_click.pending.len() >= 16 {
+                    if self.game_input_local() || self.dnd_pointer_active() || self.local_click.pending.len() >= 16 {
                         self.local_click_retire(epoch, holder);
                         self.local_click
                             .cancelled
@@ -581,14 +582,30 @@ mod tests {
         assert!(!g[1].local_click_reserved());
     }
     #[test]
-    fn game_capture_is_overridden_without_changing_owner_preference() {
+    fn game_mode_local_click_does_not_change_group_focus() {
         let mut g = group();
+        g[0].cfg.settings.game_mode_local_input = true;
         g[0].set_game_mode(GameMode::On);
         pump(&mut g, false);
         assert!(g[0].game_mode().active);
         click(&mut g[1]);
         pump(&mut g, true);
-        assert!(g.iter().all(|r| r.claim == DeviceId([2; 32])));
+        assert!(g.iter().all(|r| r.claim == DeviceId([1; 32])));
+        assert!(g.iter().all(|r| r.game_mode().active));
+    }
+    #[test]
+    fn game_mode_rejects_a_click_before_the_peer_receives_its_announcement() {
+        let mut g = group();
+        let focus = g[0].focus_claim();
+        g[0].cfg.settings.game_mode_local_input = true;
+        g[0].set_game_mode(GameMode::On);
+        // The peer can still propose a local click while the announcement is in flight.
+        g[0].out.clear();
+        click(&mut g[1]);
+        pump(&mut g, false);
+        assert!(g.iter().all(|r| r.focus_claim() == focus));
+        assert!(g[0].game_mode().active);
+        assert!(g.iter().all(|r| !r.local_click_reserved()));
     }
     #[test]
     fn movement_wheel_gesture_up_and_synthetic_down_do_not_claim() {

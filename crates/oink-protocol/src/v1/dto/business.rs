@@ -38,6 +38,7 @@ wire_map!(ControlGameMode, no_validation, {
     4 => detected: bool = required;
     5 => active: bool = required;
     6 => cursor_hiding_cause_available: Option<bool> = optional;
+    7 => local_input: Option<bool> = optional;
 });
 
 wire_map!(ControlSetGameMode, no_validation, {

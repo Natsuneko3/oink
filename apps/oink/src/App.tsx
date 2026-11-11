@@ -653,6 +653,8 @@ export function App() {
         },
         requests: pairing.requests, nearby: pairing.nearby, onShare: changeShare,
         onGameMode: (id, mode) => { void invoke(id, 'game', mode); }, onSpeaker: speaker, onMicrophone: microphone, onGrantPermission: grantDevicePermission,
+        gameModeLocalInput: prefs.prefs.gameModeLocalInput,
+        onGameModeLocalInput: prefs.canEdit('gameModeLocalInput') ? enabled => prefs.set('gameModeLocalInput', enabled) : undefined,
         onPause: (id, paused) => { void invoke(id, 'pause', paused); }, onLeave: setLeaveId,
         onEditAddress: id => { const device=devices.find(d=>d.id===id); if(device)void address.open(device); },
         onShowWindow: () => { void shell.open('main').catch(fail); }, onAbout: () => { void shell.open('about').catch(fail); },

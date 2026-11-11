@@ -131,6 +131,7 @@ impl Node {
                 mode: oink_routing::GameMode::Off,
                 detected: false,
                 active: false,
+                local_input: false,
                 cursor_hiding_cause_available: None,
             })
     }
@@ -260,6 +261,7 @@ mod game_observation_tests {
         let mut status = InputStatus {
             game_mode: true,
             game_status: Some(GameModeStatus {
+                local_input: false,
                 holder: DeviceId([2; 32]),
                 epoch: 1,
                 mode: GameMode::On,
@@ -285,6 +287,7 @@ mod game_observation_tests {
         let local = DeviceId([1; 32]);
         let mut status = InputStatus {
             game_status: Some(GameModeStatus {
+                local_input: false,
                 holder: local,
                 epoch: 1,
                 mode: GameMode::Auto,

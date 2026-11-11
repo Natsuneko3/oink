@@ -760,6 +760,7 @@ pub(crate) fn input_settings(node: &Node) -> InputSettings {
         forward_injected_input: s.routing.forward_injected_input,
         take_foreground_on_leave: s.routing.take_foreground_on_leave,
         quicker_compat: s.routing.quicker_compat,
+        game_mode_local_input: s.routing.game_mode_local_input,
         forward_wheel_by_lines: s.routing.forward_wheel_by_lines,
         sync_unlock_others: s.sync_unlock_others,
         emergency_hold_ms: s.emergency_hold_ms.get(),
@@ -1428,6 +1429,7 @@ impl AgentApi for Node {
             "forward_wheel_by_lines",
             "take_foreground_on_leave",
             "quicker_compat",
+            "game_mode_local_input",
         ] {
             if let Some(value) = local_patch.as_object_mut().and_then(|p| p.remove(key)) {
                 let routing = local_patch
@@ -1458,6 +1460,7 @@ impl AgentApi for Node {
             routing.forward_injected_input = s.forward_injected_input;
             routing.take_foreground_on_leave = s.take_foreground_on_leave;
             routing.quicker_compat = s.quicker_compat;
+            routing.game_mode_local_input = s.game_mode_local_input;
             routing.forward_wheel_by_lines = s.forward_wheel_by_lines;
             routing.remote_scroll_speed = s.scroll.speed;
             routing.fixed_reference_display = match s.pointer.reference {

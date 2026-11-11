@@ -19,6 +19,18 @@ beforeEach(()=>{
   mocks.call.mockResolvedValue(mocks.state.localPreferences);
 });
 afterEach(cleanup);
+it('defaults game input isolation off and saves only the switch before reloading it', async()=>{
+  const mounted=renderHook(usePreferences);
+  expect(mounted.result.current.prefs.gameModeLocalInput).toBe(false);
+  await act(async()=>mounted.result.current.set('gameModeLocalInput',true));
+  expect(mocks.input).toHaveBeenCalledExactlyOnceWith({game_mode_local_input:true});
+  expect(mocks.audio).not.toHaveBeenCalled();
+  expect(mocks.clipboard).not.toHaveBeenCalled();
+  mounted.unmount();
+  mocks.state.input={...(mocks.state.input as object),game_mode_local_input:true};
+  const reloaded=renderHook(usePreferences);
+  expect(reloaded.result.current.prefs.gameModeLocalInput).toBe(true);
+});
 it.each(['macos','windows'])('persists a separate custom map through preset changes and a fresh webview on %s',async platform=>{
   const mac=platform==='macos',target=mac?'windows':'macos';
   const keyboard:InputTransform['windows']['keyboard']={preset:'custom',table:[{from:0x700e0,to:0},{from:0x700e1,to:0x700e3},{from:0x700e2,to:0x700e0},{from:0x700e3,to:0x700e6},...(mac?[{from:0xff0003,to:0}]:[])],caps_tap_hold:{tap:0,hold:0}};

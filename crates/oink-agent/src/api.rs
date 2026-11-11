@@ -1041,6 +1041,9 @@ pub struct InputSettings {
     /// Windows device-local Quicker compatibility mode, default off. Never replicated.
     #[serde(default)]
     pub quicker_compat: bool,
+    /// Keep all participants' keyboard and mouse local when this device hosts game mode.
+    #[serde(default)]
+    pub game_mode_local_input: bool,
     /// Physical source preference, persisted only by this device.
     #[serde(default = "default_true")]
     pub forward_wheel_by_lines: bool,
@@ -2882,6 +2885,7 @@ mod tests {
             mode: oink_routing::GameMode::Auto,
             detected: true,
             active: true,
+            local_input: false,
             cursor_hiding_cause_available: Some(false),
         });
         let json = serde_json::to_value(status).unwrap();
@@ -3172,6 +3176,7 @@ fn test_input_settings() -> InputSettings {
         forward_injected_input: true,
         take_foreground_on_leave: false,
         quicker_compat: false,
+        game_mode_local_input: false,
         forward_wheel_by_lines: true,
         sync_unlock_others: false,
         emergency_hold_ms: 5000,

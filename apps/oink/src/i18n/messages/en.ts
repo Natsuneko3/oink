@@ -318,6 +318,8 @@ export const en = {
   "自动检测游戏": "Detect games automatically",
   "开启": "On",
   "按 3D 游戏方式发送鼠标事件": "Send relative mouse input for 3D games",
+  "游戏时独立控制键鼠": "Keep keyboard and mouse local in game mode",
+  "此设备进入游戏模式时，暂停键盘和鼠标共享；音频和剪贴板共享不变": "When this computer enters game mode, pause keyboard and mouse sharing; audio and clipboard sharing stay unchanged",
   "state|关闭": "Off",
   "按桌面应用方式发送鼠标事件": "Send desktop mouse input",
   "该设备的鼠标只能控制自己": "This device’s mouse controls itself",

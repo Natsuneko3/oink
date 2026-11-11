@@ -2,6 +2,8 @@
 
 This custom release is built by GitHub Actions from the exact source commit associated with its release tag.
 
+Includes the current local input-routing changes and a per-device option for independent keyboard/mouse control while gaming; audio and clipboard sharing are unchanged.
+
 - **macOS Apple silicon:** arm64 DMG and ZIP, macOS 14.2 or later.
 - **macOS Intel:** x64 DMG and ZIP, macOS 14.2 or later.
 - **Windows:** unsigned x64 MSI, Windows 10 version 1809 or later, or Windows 11.

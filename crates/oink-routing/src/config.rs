@@ -114,6 +114,8 @@ pub struct RoutingSettings {
     /// Runtime projection of this device owner's persistent game preference.
     #[serde(skip)]
     pub game_mode_preference: crate::GameMode,
+    /// When this device hosts game mode, keep every participant's input local.
+    pub game_mode_local_input: bool,
     /// Return remotely controlled focus to its pointer source when all local displays sleep.
     pub return_pointer_on_display_sleep: bool,
     /// Respond to group user activity by waking displays.
@@ -162,6 +164,7 @@ impl Default for RoutingSettings {
             take_foreground_on_leave: false,
             quicker_compat: false,
             game_mode_preference: crate::GameMode::Auto,
+            game_mode_local_input: false,
             return_pointer_on_display_sleep: true,
             wake_displays_on_input: true,
             dnd: true,

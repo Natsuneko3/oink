@@ -6,12 +6,12 @@ on:
       build:
         description: Reserved product build for this custom release
         required: true
-        default: '114'
+        default: '115'
         type: string
       release_tag:
         description: New tag for the custom release
         required: true
-        default: v0.3.5-custom.1
+        default: v0.3.5-custom.2
         type: string
       arm_cross_compile:
         description: Build arm64 on Intel macOS without native ARM runtime checks

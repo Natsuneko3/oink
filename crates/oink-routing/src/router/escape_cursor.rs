@@ -6,6 +6,7 @@ impl Router {
     pub fn game_escape_readback(&self, source: DeviceId) -> bool {
         self.has_pointer_focus()
             && self.game_mode().active
+            && !self.game_input_local()
             && self.input_ready(source)
             && self.pointer_lock_escape_held()
     }

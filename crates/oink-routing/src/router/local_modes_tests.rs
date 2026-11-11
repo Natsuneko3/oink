@@ -286,7 +286,7 @@ fn local_modes_do_not_claim_fresh_join_or_override_disabled_guard() {
 #[test]
 fn raw_game_sync_never_replays_local_mouse_motion() {
     let mut r = router(true);
-    r.receive_game_state(PEER, 1, 1, GameMode::On, false, true, None);
+    r.receive_game_state(PEER, 1, 1, GameMode::On, false, true, None, false);
     event(&mut r, InputEvent::RawPointerDelta { dx: 20., dy: 1. });
     modes(&mut r, InputMode::Local, InputMode::Shared);
     r.out.clear();
@@ -296,6 +296,262 @@ fn raw_game_sync_never_replays_local_mouse_motion() {
         !inputs(&r)
             .iter()
             .any(|i| matches!(i, InputMsg::RelativeMotion { .. } | InputMsg::Motion { .. }))
+    );
+}
+
+#[test]
+fn game_mode_keeps_keyboard_and_mouse_local_without_changing_saved_modes() {
+    let mut r = router(true);
+    let claim = r.focus_claim();
+    let settings = r.config().settings.clone();
+    r.receive_game_state(PEER, 1, 1, GameMode::On, false, true, None, true);
+    assert!(r.out.contains(&Output::RestoreLocal {
+        at: Point::new(123., 234.)
+    }));
+    r.out.clear();
+    for e in [
+        InputEvent::PointerDelta { dx: 20., dy: 0. },
+        InputEvent::RawPointerDelta { dx: 20., dy: 0. },
+        InputEvent::Button {
+            button: MouseButton::Left,
+            pressed: true,
+        },
+        InputEvent::Button {
+            button: MouseButton::Left,
+            pressed: false,
+        },
+        InputEvent::Scroll {
+            dx: 0.,
+            dy: 1.,
+            unit: ScrollUnit::Line,
+            phase: ScrollPhase::None,
+            wheel_steps: None,
+        },
+        InputEvent::Gesture(Gesture::SmartMagnify),
+        InputEvent::Key { code: A, pressed: true },
+        InputEvent::Key {
+            code: A,
+            pressed: false,
+        },
+    ] {
+        assert_eq!(event(&mut r, e), Disposition::Pass);
+    }
+    r.send_relative_total();
+    assert!(inputs(&r).is_empty());
+    assert_eq!(r.focus_claim(), claim);
+    assert_eq!(r.config().settings, settings);
+    assert!(!r.paused());
+
+    r.receive_game_state(PEER, 1, 2, GameMode::Off, false, false, None, true);
+    assert!(
+        r.out
+            .iter()
+            .any(|o| matches!(o, Output::SetMode(CaptureMode::Remote { .. })))
+    );
+    r.out.clear();
+    assert_eq!(
+        event(&mut r, InputEvent::PointerDelta { dx: 20., dy: 0. }),
+        Disposition::Swallow
+    );
+    assert!(inputs(&r).iter().any(|i| matches!(i, InputMsg::Motion { .. })));
+    assert_eq!(
+        event(&mut r, InputEvent::Key { code: A, pressed: true }),
+        Disposition::Swallow
+    );
+    assert!(inputs(&r).contains(&&InputMsg::Key { code: A, pressed: true }));
+}
+
+#[test]
+fn game_mode_releases_remote_keyboard_and_mouse_holds() {
+    let mut r = router(true);
+    event(
+        &mut r,
+        InputEvent::Button {
+            button: MouseButton::Left,
+            pressed: true,
+        },
+    );
+    event(&mut r, InputEvent::Key { code: A, pressed: true });
+    r.out.clear();
+    r.receive_game_state(PEER, 1, 1, GameMode::On, false, true, None, true);
+    assert!(inputs(&r).contains(&&InputMsg::Button {
+        button: MouseButton::Left,
+        pressed: false
+    }));
+    assert!(inputs(&r).contains(&&InputMsg::Key {
+        code: A,
+        pressed: false
+    }));
+    r.out.clear();
+    event(
+        &mut r,
+        InputEvent::Button {
+            button: MouseButton::Left,
+            pressed: false,
+        },
+    );
+    assert!(
+        inputs(&r).is_empty(),
+        "the retired physical release must not start a local click"
+    );
+    event(
+        &mut r,
+        InputEvent::Key {
+            code: A,
+            pressed: false,
+        },
+    );
+    assert!(inputs(&r).is_empty());
+}
+
+#[test]
+fn game_mode_preserves_keys_and_buttons_already_held_locally() {
+    let mut r = router(false);
+    r.cfg.settings.game_mode_local_input = true;
+    event(&mut r, InputEvent::Key { code: A, pressed: true });
+    event(
+        &mut r,
+        InputEvent::Button {
+            button: MouseButton::Left,
+            pressed: true,
+        },
+    );
+    r.out.clear();
+    r.set_pointer_captured(true);
+    assert!(r.game_mode().active);
+    assert!(!r.out.iter().any(|o| matches!(
+        o,
+        Output::Inject(InjectEvent::Key { pressed: false, .. } | InjectEvent::Button { pressed: false, .. })
+    )));
+    assert_eq!(
+        event(
+            &mut r,
+            InputEvent::Key {
+                code: A,
+                pressed: false
+            }
+        ),
+        Disposition::Pass
+    );
+    assert_eq!(
+        event(
+            &mut r,
+            InputEvent::Button {
+                button: MouseButton::Left,
+                pressed: false
+            }
+        ),
+        Disposition::Pass
+    );
+}
+
+#[test]
+fn game_mode_blocks_remote_input_and_releases_existing_holds() {
+    let mut r = router(false);
+    r.cfg.settings.game_mode_local_input = true;
+    r.reclaim_focus(None);
+    for input in [
+        InputMsg::Button {
+            button: MouseButton::Left,
+            pressed: true,
+        },
+        InputMsg::Key { code: A, pressed: true },
+    ] {
+        r.test_message(PEER, Message::Input(input), 1);
+    }
+    assert!(r.held[&PEER].buttons.contains(&MouseButton::Left));
+    r.out.clear();
+    r.set_game_mode(GameMode::On);
+    assert!(r.out.contains(&Output::Inject(InjectEvent::Button {
+        button: MouseButton::Left,
+        pressed: false
+    })));
+    assert!(r.out.contains(&Output::Inject(InjectEvent::Key {
+        code: A,
+        pressed: false
+    })));
+    r.out.clear();
+    for input in [
+        InputMsg::Motion {
+            seq: 1,
+            dx: 10.,
+            dy: 1.,
+        },
+        InputMsg::RelativeMotion {
+            epoch: r.epoch,
+            generation: 2,
+            seq: 1,
+            x: 10.,
+            y: 1.,
+        },
+        InputMsg::Button {
+            button: MouseButton::Right,
+            pressed: true,
+        },
+        InputMsg::Scroll {
+            source: SourceKind::Mouse,
+            dx: 0.,
+            dy: 1.,
+            unit: ScrollAmount::Reference,
+            phase: ScrollPhase::None,
+            wheel_steps: None,
+        },
+        InputMsg::Gesture {
+            source: SourceKind::Touchpad,
+            gesture: Gesture::SmartMagnify,
+        },
+        InputMsg::Key { code: A, pressed: true },
+        InputMsg::KeyRepeat { code: A, n: 1 },
+        InputMsg::CapsKey {
+            code: KeyCode::CAPS_LOCK,
+            pressed: true,
+        },
+    ] {
+        r.test_message(PEER, Message::Input(input.clone()), 2);
+        r.test_message(
+            PEER,
+            Message::Input(InputMsg::Forwarded {
+                origin: r.admitted_boots[&PEER],
+                hops: 1,
+                msg: Box::new(input),
+            }),
+            3,
+        );
+    }
+    assert!(!r.out.iter().any(|o| matches!(o, Output::Inject(_))));
+    r.test_message(
+        PEER,
+        Message::Input(InputMsg::Key {
+            code: A,
+            pressed: false,
+        }),
+        4,
+    );
+    assert!(!r.out.iter().any(|o| matches!(o, Output::Inject(_))));
+}
+
+#[test]
+fn automatic_game_mode_restores_saved_local_mouse_policy() {
+    let mut r = router(true);
+    modes(&mut r, InputMode::Local, InputMode::Shared);
+    r.receive_game_state(PEER, 1, 1, GameMode::Auto, true, true, None, true);
+    modes(&mut r, InputMode::Shared, InputMode::Shared);
+    assert_eq!(
+        event(&mut r, InputEvent::PointerDelta { dx: 10., dy: 0. }),
+        Disposition::Pass
+    );
+    modes(&mut r, InputMode::Local, InputMode::Shared);
+    r.out.clear();
+    r.receive_game_state(PEER, 1, 2, GameMode::Auto, false, false, None, true);
+    assert_eq!(
+        event(&mut r, InputEvent::PointerDelta { dx: 10., dy: 0. }),
+        Disposition::Pass
+    );
+    assert!(inputs(&r).is_empty());
+    assert!(
+        !r.out
+            .iter()
+            .any(|o| matches!(o, Output::SetMode(CaptureMode::Remote { .. })))
     );
 }
 

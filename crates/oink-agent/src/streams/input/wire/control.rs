@@ -242,6 +242,7 @@ pub(super) fn encode(value: &ControlMsg) -> v1::Result<Message> {
             detected,
             active,
             cursor_hiding_cause_available,
+            local_input,
         } => Message::ControlGameMode(w::ControlGameMode::from_raw(map([
             (1, epoch.write()),
             (2, generation.write()),
@@ -249,6 +250,7 @@ pub(super) fn encode(value: &ControlMsg) -> v1::Result<Message> {
             (4, detected.write()),
             (5, active.write()),
             (6, cursor_hiding_cause_available.write()),
+            (7, Some(*local_input).write()),
         ]))?),
         ControlMsg::SetGameMode { epoch, mode: value } => {
             Message::ControlSetGameMode(w::ControlSetGameMode::from_raw(map([
@@ -361,6 +363,7 @@ pub(super) fn decode(value: Message) -> v1::Result<ControlMsg> {
             detected: v.detected()?,
             active: v.active()?,
             cursor_hiding_cause_available: v.cursor_hiding_cause_available()?,
+            local_input: v.local_input()?.unwrap_or(false),
         },
         Message::ControlSetGameMode(v) => ControlMsg::SetGameMode {
             epoch: v.epoch()?,

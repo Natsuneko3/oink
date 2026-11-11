@@ -468,6 +468,7 @@ mod dispatch_tests {
                 mode: GameMode::Auto,
                 detected: false,
                 active: false,
+                local_input: false,
                 cursor_hiding_cause_available: None,
             },
             ControlMsg::SetGameMode {

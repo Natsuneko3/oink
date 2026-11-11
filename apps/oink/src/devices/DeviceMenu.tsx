@@ -142,6 +142,8 @@ export interface SideContextMenuProps {
     onMicrophone?: (id:string,action:MicrophoneAction)=>void;
     onGrantPermission?: (id:string,kind:'input_monitoring'|'microphone')=>void;
     onGameMode: (id: string, mode: GameMode) => void;
+    gameModeLocalInput?: boolean;
+    onGameModeLocalInput?: (enabled: boolean) => void;
     onPause: (id: string, paused: boolean) => void;
     onLeave: (id: string) => void;
     onEditAddress: (id: string) => void;
@@ -157,7 +159,7 @@ export interface SideContextMenuProps {
     children: ReactNode;
     standalone?: boolean;
 }
-export function SideContextMenu({ devices, screens = [], onHideScreen, onScreensHidden, screenEditPending = false, editableScreenDevices: _editableScreenDevices, requests, nearby, onShare, onMicrophone, onGrantPermission, onGameMode, onPause, onLeave, onEditAddress, onShowWindow, onAbout, onQuit, onAccept, onReject, onPair, onBlock, onOpenChange, children, standalone = false }: SideContextMenuProps) {
+export function SideContextMenu({ devices, screens = [], onHideScreen, onScreensHidden, screenEditPending = false, editableScreenDevices: _editableScreenDevices, requests, nearby, onShare, onMicrophone, onGrantPermission, onGameMode, gameModeLocalInput = false, onGameModeLocalInput, onPause, onLeave, onEditAddress, onShowWindow, onAbout, onQuit, onAccept, onReject, onPair, onBlock, onOpenChange, children, standalone = false }: SideContextMenuProps) {
     const [ctx, setCtx] = useState<Ctx | null>(null);
     const [open, setOpenState] = useState(false);
     const ctxRef = useRef<Ctx | null>(null);
@@ -238,6 +240,9 @@ export function SideContextMenu({ devices, screens = [], onHideScreen, onScreens
               <MenuRadioGroup aria-label={tr('游戏模式')} value={d.gameMode ?? ''} onChange={v => onGameMode(d.id,v as GameMode)}>
                 {ROWS.find(r => r.kind === 'game')!.options.map(o => <MenuRadioItem key={o.value} value={o.value} closeOnSelect disabled={d.unknown}>{o.label}</MenuRadioItem>)}
               </MenuRadioGroup>
+              {self && <><MenuSeparator/><MenuCheckboxItem checked={gameModeLocalInput} disabled={!onGameModeLocalInput} onCheckedChange={on => onGameModeLocalInput?.(on)}>
+                <Tooltip interactive={false} content={tr('此设备进入游戏模式时，暂停键盘和鼠标共享；音频和剪贴板共享不变')}><span>{tr('游戏时独立控制键鼠')}</span></Tooltip>
+              </MenuCheckboxItem></>}
             </MenuSub>
             <MenuItem icon={glyph('speaker')} disabled={(unavailable('speaker') && !d.speaker.canMakeExit)} onSelect={() => onShare(d.id,'speaker',speakerReceiver ? 'unused' : 'exit')}>{speakerReceiver ? tr('关闭音频出口') : tr('设为音频出口')}</MenuItem>
             {exit && exit.id !== d.id && <MenuCheckboxItem closeOnSelect disabled={unavailable('speaker')} checked={speakerSource} onCheckedChange={on => onShare(d.id,'speaker',on ? 'forwarding' : 'unused')}>{tr('转发音频到 {0}',exit.name)}</MenuCheckboxItem>}

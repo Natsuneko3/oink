@@ -645,7 +645,7 @@ impl Router {
         let mut session = [0; 16];
         getrandom::fill(&mut session).expect("routing session entropy");
         let admitted_boots = HashMap::from([(me, cfg.boot)]);
-        let game = GameState::for_owner(cfg.settings.game_mode_preference);
+        let game = GameState::for_owner(cfg.settings.game_mode_preference, cfg.settings.game_mode_local_input);
         let mut router = Self {
             cfg,
             admitted_boots,
@@ -794,10 +794,13 @@ impl Router {
             }
         }
         let preference_changed = self.cfg.settings.game_mode_preference != settings.game_mode_preference;
+        let game_input_changed = self.cfg.settings.game_mode_local_input != settings.game_mode_local_input;
         self.cfg.settings = settings;
         self.publish_lock_escape();
         if preference_changed {
             self.apply_game_preference();
+        } else if game_input_changed {
+            self.refresh_game_input_policy();
         }
         if self.dnd_enabled() != dnd_was {
             if !self.dnd_enabled() {
@@ -2661,6 +2664,7 @@ impl Router {
                 detected,
                 active,
                 cursor_hiding_cause_available,
+                local_input,
             } => {
                 self.receive_game_state(
                     from,
@@ -2670,6 +2674,7 @@ impl Router {
                     detected,
                     active,
                     cursor_hiding_cause_available,
+                    local_input,
                 );
             }
             ControlMsg::LockRemoteWindows(request) => self.receive_windows_lock(from, request),
@@ -2909,7 +2914,11 @@ impl Router {
             self.filter_multifinger(origin, contacts::MultiEvent::Scroll(*phase));
             return;
         }
-        if self.paused || self.epoch == 0 || !self.scope_allows(self.focus_scope.as_ref(), self.claim) {
+        if self.paused
+            || self.game_input_local()
+            || self.epoch == 0
+            || !self.scope_allows(self.focus_scope.as_ref(), self.claim)
+        {
             // 尚未接受移交、共享已暂停或旧实例焦点：远端的移动、按下、滚动不生效；抬起仍处理。
             let drop = match &msg {
                 InputMsg::Motion { .. }
@@ -2917,7 +2926,7 @@ impl Router {
                 | InputMsg::Scroll { .. }
                 | InputMsg::KeyRepeat { .. } => true,
                 // 手势的结束照常处理（Dock 不会停在半途）。
-                InputMsg::Gesture { gesture, .. } => !gesture.ends(),
+                InputMsg::Gesture { gesture, .. } => !gesture.ends() || (self.game_input_local() && gesture.starts()),
                 InputMsg::TouchpadContacts(frame) => !frame.phase.ends(),
                 InputMsg::Key { pressed, .. }
                 | InputMsg::CapsKey { pressed, .. }
