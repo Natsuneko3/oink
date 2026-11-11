@@ -32,25 +32,22 @@ jobs:
       - name: Verify real Apple Development signature
         run: |
           python3 - <<'PY'
-          import hashlib, json, os, pathlib, plistlib, shutil, subprocess, sys, tempfile
+          import json, pathlib, plistlib, subprocess, sys, tempfile
           sys.path.insert(0, 'packaging/macos')
           from signing import select_identity, verify_signature
           mac = json.loads(pathlib.Path('packaging/identity.json').read_text())['macos']
           identity = select_identity(mac['team_id'], mac['signing_fingerprint'], kind='apple-development')
           with tempfile.TemporaryDirectory() as folder:
               binary = pathlib.Path(folder) / 'signing-check'
-              shutil.copyfile('/usr/bin/true', binary)
-              binary.chmod(0o755)
-              subprocess.run(['codesign', '--remove-signature', str(binary)], check=True, capture_output=True)
+              subprocess.run(['clang', '-x', 'c', '-o', str(binary), '-'],
+                             input=b'int main(void) { return 0; }\n', check=True, capture_output=True)
               entitlements = pathlib.Path(folder) / 'entitlements.plist'
               entitlements.write_bytes(plistlib.dumps({'com.apple.security.application-groups': [mac['team_id'] + '.' + mac['app_group_suffix']], 'com.apple.security.device.audio-input': True}))
               subprocess.run(['codesign', '--force', '--timestamp=none', '--sign', identity, '--entitlements', str(entitlements), str(binary)], check=True, capture_output=True)
-              verify_signature(binary, mac['team_id'], apple_development=True)
-              subprocess.run(['codesign', '-d', '--extract-certificates', str(pathlib.Path(folder) / 'cert'), str(binary)], check=True, capture_output=True)
-              actual = hashlib.sha1((pathlib.Path(folder) / 'cert0').read_bytes()).hexdigest().upper()
-              assert actual == mac['signing_fingerprint'], 'signer certificate fingerprint mismatch'
+              verify_signature(binary, mac['team_id'], apple_development=True,
+                               fingerprint=mac['signing_fingerprint'])
               subprocess.run([str(binary)], check=True)
-              print('Verified Apple Development signature; team=' + mac['team_id'] + '; certificate=' + actual)
+              print('Verified Apple Development signature; team=' + mac['team_id'] + '; certificate=' + mac['signing_fingerprint'])
           PY
       - name: Remove ephemeral signing material
         if: always()

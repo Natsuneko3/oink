@@ -114,7 +114,7 @@ def verify_signature(path, team, *, development_signing=False, apple_development
     if fingerprint:
         with tempfile.TemporaryDirectory(prefix='oink-signature-') as directory:
             prefix = Path(directory) / 'certificate'
-            private_run('codesign', '-d', '--extract-certificates', prefix, path)
+            private_run('codesign', '-d', '--extract-certificates=' + str(prefix), path)
             certificate = Path(str(prefix) + '0')
             if not certificate.is_file() or hashlib.sha1(certificate.read_bytes()).hexdigest().upper() != fingerprint.upper():
                 raise RuntimeError('Signing certificate fingerprint mismatch')

@@ -3,6 +3,7 @@ import importlib.util
 import sys
 from pathlib import Path
 import subprocess
+import ssl
 import unittest
 from unittest.mock import patch
 
@@ -56,6 +57,23 @@ class AppleDevelopmentSigning(unittest.TestCase):
             with patch.object(S, 'private_run', return_value=subprocess.CompletedProcess([], 0, '', details)):
                 with self.assertRaises(RuntimeError):
                     S.verify_signature(Path('Oink.app'), TEAM, apple_development=True)
+
+    def test_verification_accepts_only_the_exact_embedded_certificate(self):
+        def external(*args, **kwargs):
+            if args[:2] == ('codesign', '--verify'):
+                return subprocess.CompletedProcess([], 0, '', '')
+            if args[:2] == ('codesign', '-dvv'):
+                return subprocess.CompletedProcess([], 0, '',
+                    f'Authority=Apple Development: Fixture (PERSONAL01)\nTeamIdentifier={TEAM}\n')
+            if args[:2] == ('codesign', '-d') and args[2].startswith('--extract-certificates='):
+                prefix = args[2].split('=', 1)[1]
+                Path(prefix + '0').write_bytes(ssl.PEM_cert_to_DER_cert(CERTIFICATE_PEM))
+                return subprocess.CompletedProcess([], 0, '', '')
+            raise RuntimeError('Invalid certificate extraction command')
+        with patch.object(S, 'private_run', side_effect=external):
+            S.verify_signature(Path('Oink.app'), TEAM, apple_development=True, fingerprint=FINGERPRINT)
+            with self.assertRaisesRegex(RuntimeError, 'fingerprint mismatch'):
+                S.verify_signature(Path('Oink.app'), TEAM, apple_development=True, fingerprint='B' * 40)
 
     def test_development_certificate_never_passes_formal_verification(self):
         details = f'Authority=Apple Development: Fixture ({TEAM})\nTeamIdentifier={TEAM}\n'
