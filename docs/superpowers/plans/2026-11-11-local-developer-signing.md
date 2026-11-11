@@ -28,8 +28,8 @@
 
 ### Task 3: Finish and synchronize
 - [x] Review the complete patch, document developer-certificate distribution limits, and confirm remote configuration.
-- [ ] Synchronize only signing-owned changes into the original checkout; keep unrelated work and staging unchanged.
-- [ ] Report exactly which configuration and checks completed; existing installed/released bundles remain unchanged until rebuilt.
+- [x] Synchronize only signing-owned changes into the original checkout; keep unrelated work and staging unchanged.
+- [x] Report exactly which configuration and checks completed; existing installed/released bundles remain unchanged until rebuilt.
 
 ## Verification evidence and rulings
 
@@ -47,3 +47,10 @@
 
 - Final code verification succeeded on GitHub run 43031748480, commit 6f5815c5032e2dfb4aa8b59c96ad3f27b223d42f. Full packaging checks, development identity import, strict code signature/actual Team ID/leaf fingerprint verification, executable launch with the host App Group/audio entitlements, and ephemeral-keychain cleanup all passed. URL: https://github.com/Natsuneko3/oink/actions/runs/43031748480 . No full product package or installed app was changed.
 - User explicitly requested main integration and deletion of both codex/local-developer-signing and origin/codex/local-developer-signing. Preserve all commits in main before deleting either branch.
+
+## Completed integration and cleanup
+
+- The user-requested signing changes and verification record were fast-forwarded into the original main checkout and pushed to origin/main as 3e3f3e63916ca2b472420b5c24412d1ac842a2ce. The existing game/input commits remain ancestors.
+- Both codex/local-developer-signing and origin/codex/local-developer-signing were deleted only after confirming their commits are reachable from main. Remote deletion used an exact expected-ref lease. No source commits were discarded.
+- The app refused to archive the task's protected primary checkout, and the original project directory is not a managed worktree that can be attached. The task worktree is therefore retained detached at main; the original project checkout /Volumes/NekoSSD/Github/oink remains on main. No filesystem removal was forced.
+- GitHub verification run 43031748480 passed 7 focused signing tests, the full packaging suite (256 tests, 3 platform skips), actual signing/Team ID/leaf fingerprint checks and executable launch, and keychain cleanup. The actual signing Team ID is D765989V7S; certificate SHA1 is 3A92F137F2E694DFB6F4AC3E6F9A901EC6B1B7AA.
