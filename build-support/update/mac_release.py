@@ -22,6 +22,7 @@ import feed
 import feed_site
 import published_release
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from identity import IDENTITY
 from provenance import source_tree_sha256
 from sparkle import prepare
 spec = importlib.util.spec_from_file_location('mac_appcast', Path(__file__).with_name('mac-appcast.py'))
@@ -64,7 +65,7 @@ def validate_release(record, annotations, tag, commit, tree, platform="macos"):
     mac = record['platforms'][platform]
     feed.require(all(mac.get(k) == record[k] for k in ('version', 'build', 'built_commit', 'source_tree_sha256')) and
                  mac.get('source_commit') is None and mac['notarized'] is True and
-                 mac['team_id'] == feed.read(feed.ROOT / 'packaging/identity.json')['macos']['team_id'] and
+                 mac['team_id'] == IDENTITY['macos']['team_id'] and
                  all(mac['notarization'][k]['status'] == 'Accepted' and mac['notarization'][k]['stapled'] is True
                      for k in ('app', 'dmg')) and
                  mac['launch_smoke']['status'] == 'passed' and mac['launch_smoke']['signed'] is True and
@@ -176,7 +177,7 @@ def candidate(state, output, cache, tag):
             feed.require(arches == [native_arch], 'archive_architecture')
             verify_update_transport(info)
             verify_imports([app], '14.2')
-            verify_published_app(app, feed.read(feed.ROOT / 'packaging/identity.json')['macos']['team_id'])
+            verify_published_app(app, IDENTITY['macos']['team_id'])
             signer = prepare(cache) / 'bin/sign_update'
             signature = sign(signer, archive, config['mac']['public_key'])
             metadata = dict(architecture=architecture, build=record['build'], version=record['version'],
