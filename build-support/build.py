@@ -13,9 +13,9 @@ from sparkle import prepare as prepare_sparkle
 from versioning import release_version
 from package_cache import configure_cache
 from update_qualification import origin as test_origin, verify_binaries
+from identity import IDENTITY
 
 ROOT = Path(__file__).resolve().parents[1]
-IDENTITY = json.loads((ROOT / 'packaging/identity.json').read_text())
 TARGETS = ('aarch64-apple-darwin', 'x86_64-pc-windows-msvc', 'x86_64-apple-darwin')
 
 

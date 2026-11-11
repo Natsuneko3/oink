@@ -13,7 +13,7 @@ import urllib.request
 import uuid
 import zipfile
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'build-support'))
-from identity import artifact_stem, signpath_configuration, windows_product_version
+from identity import artifact_stem, signpath_configuration, windows_product_version, load_identity
 from provenance import verify, digest
 import package_notes
 from payload import copy_notices
@@ -23,7 +23,7 @@ import xml.etree.ElementTree as ET
 from versioning import release_version
 
 ROOT = Path(__file__).resolve().parents[2]
-I = json.loads((ROOT / 'packaging/identity.json').read_text())
+I = load_identity()
 WIX_VERSION = '5.0.2'
 WIX_SHA256 = 'f30ef0c74e2a986126539c5780be93ac24e8136eaf723b1937b26272703ae173'
 UI_SHA256 = '5ef2c707614b9f70b6bbadd2d4abcb4124efee215e9b16bfbc80113079a604c7'

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Publish this fork's explicitly unnotarized development distributions."""
+"""Publish GitHub-built signed distributions with explicit provenance checks."""
 import argparse
 import json
 import os
@@ -121,7 +121,7 @@ def assemble(downloads, build, commit, output):
         copy_assets(record, paths[0].parent, output)
         records[platform] = record
         assets.extend(record['artifacts'])
-    source_name = f'Oink-{IDENTITY["version"]}-custom-{build}-source.tar.gz'
+    source_name = f'Oink-{IDENTITY["version"]}-build{build}-source.tar.gz'
     archive = output / source_name
     subprocess.run(['git', 'archive', '--format=tar.gz', '--prefix=Oink-source/',
                     '--output', str(archive), commit], cwd=ROOT, check=True)
@@ -136,27 +136,60 @@ def assemble(downloads, build, commit, output):
 
 
 def publish(output, tag, notes):
-    require(os.environ.get('GITHUB_REPOSITORY') == REPOSITORY and
+    require(os.environ.get('GITHUB_ACTIONS') == 'true' and
+            os.environ.get('GITHUB_REPOSITORY') == REPOSITORY and
             os.environ.get('GITHUB_REF') == 'refs/heads/main' and
-            os.environ.get('GITHUB_EVENT_NAME') == 'workflow_dispatch', 'trusted_custom_dispatch_required')
+            os.environ.get('GITHUB_EVENT_NAME') in ('push', 'workflow_dispatch'), 'trusted_release_context_required')
     record = json.loads((output / 'release.json').read_bytes())
     require(record.get('custom_release') is True and record['built_commit'] == head() and
-            record['source_tree_sha256'] == source_tree_sha256(), 'release_source_mismatch')
-    require(re.fullmatch(re.escape('v' + record['version']) + r'-custom\.[1-9][0-9]*', tag) is not None,
-            'invalid_custom_release_tag')
+            record['source_tree_sha256'] == source_tree_sha256() and record['version'] == IDENTITY['version'],
+            'release_source_mismatch')
+    require(tag == 'v' + record['version'], 'invalid_release_tag')
     sys.path.insert(0, str(ROOT / 'build-support/update'))
     import release_assets
-    require(release_assets.request(f'repos/{REPOSITORY}/releases/tags/{tag}', missing=True) is None and
-            release_assets.request(f'repos/{REPOSITORY}/git/ref/tags/{tag}', missing=True) is None,
-            'release_or_tag_already_exists')
+    from custom_release_versions import tag_reservation, latest_published_build
+    latest = release_assets.request(f'repos/{REPOSITORY}/git/ref/heads/main')
+    if latest['object'].get('type') != 'commit' or latest['object'].get('sha') != record['built_commit']:
+        print('Main has advanced; this superseded build will not publish a Release or update feeds.')
+        return False
+    reservation = tag_reservation(tag, release_assets.request)
+    require(reservation is not None and all(reservation[k] == record[k] for k in
+            ('version', 'build', 'built_commit', 'source_tree_sha256')), 'release_reservation_mismatch')
+    maximum = latest_published_build(release_assets.request)
+    if maximum > record['build']:
+        print('A higher build is already public; this older reservation will not replace it.')
+        return False
+    live = release_assets.request(f'repos/{REPOSITORY}/releases/tags/{tag}', missing=True)
+    if live is not None:
+        import feed
+        require(live.get('tag_name') == tag and live.get('draft') is False and
+                live.get('prerelease') is False and live.get('published_at'), 'existing_release_not_public')
+        manifests = [a for a in live['assets'] if a['name'] == 'release.json']
+        require(len(manifests) == 1 and 0 < manifests[0]['size'] <= feed.MAX_FEED and
+                manifests[0]['browser_download_url'] ==
+                f'https://github.com/{REPOSITORY}/releases/download/{tag}/release.json', 'existing_release_manifest')
+        raw = feed.download(manifests[0]['browser_download_url'], feed.MAX_FEED, True)
+        require(len(raw) == manifests[0]['size'], 'existing_release_manifest_size')
+        existing = feed.loads(raw)
+        require(all(existing.get(k) == record.get(k) for k in
+                ('schema', 'product', 'version', 'build', 'built_commit', 'source_tree_sha256', 'custom_release')) and
+                set(existing.get('platforms', {})) == set(PLATFORMS), 'existing_release_provenance')
+        for platform, receipt in existing['platforms'].items():
+            validate(receipt, platform, record['build'], record['built_commit'], record['source_tree_sha256'])
+            require(receipt.get('built_commit') == record['built_commit'] and receipt.get('custom_release') is True,
+                    'existing_platform_provenance')
+        print('This reserved Release is already public with matching provenance; keeping its original assets.')
+        return True
+    require(maximum < record['build'], 'release_build_already_published')
     assets = record['artifacts'] + [record['source_artifact']]
     for asset in assets:
         path = output / asset['name']
         require(path.stat().st_size == asset['size'] and digest(path) == asset['sha256'], 'final_asset_digest')
     files = [output / a['name'] for a in assets] + [output / 'release.json', output / 'SHA256SUMS']
     subprocess.run(['gh', 'release', 'create', tag, '--repo', REPOSITORY,
-                    '--target', record['built_commit'], '--latest', '--title', f'Oink {tag} (development)',
+                    '--verify-tag', '--target', record['built_commit'], '--latest', '--title', f'Oink {tag}',
                     '--notes-file', str(notes), *map(str, files)], cwd=ROOT, check=True)
+    return True
 
 
 def main():
@@ -172,7 +205,10 @@ def main():
     parser.add_argument('--notes', type=Path, default=Path('.github/custom-release-notes.md'))
     args = parser.parse_args()
     if args.operation == 'publish':
-        publish(args.output, args.tag, args.notes)
+        published = publish(args.output, args.tag, args.notes)
+        if os.environ.get('GITHUB_OUTPUT'):
+            with Path(os.environ['GITHUB_OUTPUT']).open('a') as outputs:
+                outputs.write(f'published={str(published).lower()}\n')
     else:
         require(type(args.build) is int and 113 < args.build < 2**31, 'custom_build_must_advance_113')
         if args.operation == 'stage':

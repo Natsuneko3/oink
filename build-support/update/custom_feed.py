@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Sign an explicitly opted-in fork development Release into both update feeds."""
+"""Verify a signed fork Release and publish its macOS and Windows update feeds."""
 import argparse
 import copy
 import io
@@ -199,6 +199,46 @@ def recover():
     deploy.verify_rollback()
 
 
+def already_published(state, record, tag):
+    """A retry may follow a successful commit whose final acknowledgement was lost."""
+    registry = feed.registry(state)
+    if not all(registry['platforms'][platform]['enabled'] for platform in ('mac', 'windows')):
+        return False
+    catalog = registry['platforms']['mac'].get('catalog', {})
+    for platform, arch_path in (('macos', ''), ('macos-x64', 'x64/')):
+        archives = [a for a in record['platforms'][platform]['artifacts'] if a['name'].endswith('.zip')]
+        feed.require(len(archives) == 1, 'mac_archive_count')
+        asset = archives[0]
+        expected = {'build': record['build'], 'version': record['version'], 'sha256': asset['sha256'],
+                    'url': f'https://github.com/{feed.REPOSITORY}/releases/download/{tag}/{asset["name"]}'}
+        for channel in ('stable', 'beta'):
+            previous = catalog.get(f'mac/v1/mac-2026-01/{arch_path}{channel}/appcast.xml', {})
+            if any(previous.get(k) != v for k, v in expected.items()):
+                return False
+    path = state / f'site/windows/releases/{record["build"]}/release.json'
+    if not path.is_file():
+        return False
+    raw = path.read_bytes()
+    approved = feed.loads(raw)
+    asset = record['platforms']['windows']['artifacts'][0]
+    expected = approved.get('release', {})
+    if (approved.get('source_tree_sha256') != record['source_tree_sha256'] or
+            expected.get('build') != record['build'] or expected.get('version') != record['version'] or
+            expected.get('tag') != tag or expected.get('package', {}).get('sha256') != asset['sha256'] or
+            expected.get('package', {}).get('url') !=
+            f'https://github.com/{feed.REPOSITORY}/releases/download/{tag}/{asset["name"]}'):
+        return False
+    record_hash = feed.digest(raw)
+    active = feed.trust()['windows']
+    if not active or not all(record_hash in registry['feeds'].get(epoch['epoch'], {}).get(channel, {}).get('records', [])
+                             for epoch in active for channel in epoch['channels']):
+        return False
+    # Keep the existing signature and public readback boundary even for a no-op retry.
+    feed_site.verify_all(state)
+    feed_site.verify_public(state)
+    return True
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--release-tag')
@@ -207,20 +247,22 @@ def main():
     args = parser.parse_args()
     feed.require(os.environ.get('GITHUB_ACTIONS') == 'true' and
                  os.environ.get('GITHUB_REPOSITORY') == feed.REPOSITORY and
-                 os.environ.get('GITHUB_EVENT_NAME') == 'workflow_dispatch' and
+                 os.environ.get('GITHUB_EVENT_NAME') in ('push', 'workflow_dispatch') and
                  os.environ.get('GITHUB_REF') == 'refs/heads/main' and
                  os.environ.get('OINK_FEED_LOCK') == 'oink-update-feed-publish', 'custom_feed_context')
     if args.recover:
         recover()
         return
     feed.require(args.release_tag and args.tool_cache, 'custom_feed_arguments')
-    feed.require(re.fullmatch(re.escape('v' + IDENTITY['version']) + r'-custom\.[1-9][0-9]*', args.release_tag),
-                 'custom_release_tag')
+    feed.require(args.release_tag == 'v' + IDENTITY['version'], 'release_tag_version')
     commit, source = current_source()
     record, package = published(args.release_tag, commit, source)
     os.environ.update(OINK_SOURCE_TREE_SHA256=source, OINK_RELEASE_TAG=args.release_tag,
                       OINK_PUBLISHED_BUILD=str(record['build']))
     state, final = Path('feed-state'), Path('next-state')
+    if already_published(state, record, args.release_tag):
+        print('This Release already has verified public macOS and Windows update feeds.')
+        return
     feed.require(not final.exists(), 'candidate_directory_exists')
     now = int(feed.dt.datetime.now(feed.dt.timezone.utc).timestamp())
     with tempfile.TemporaryDirectory(prefix='oink-custom-feeds-') as folder:

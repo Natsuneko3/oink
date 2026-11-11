@@ -16,7 +16,7 @@ import tempfile
 import uuid
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'build-support'))
 from provenance import verify, digest
-from identity import artifact_stem
+from identity import artifact_stem, load_identity
 import package_notes
 from payload import copy_notices
 from report_manifest import write_manifest, image_identity
@@ -30,7 +30,7 @@ from macos_registration import temporary_registrations
 from versioning import release_version, macos_version_fields
 
 ROOT = Path(__file__).resolve().parents[2]
-I = json.loads((ROOT / 'packaging/identity.json').read_text())
+I = load_identity()
 PROVIDER_EXTENSION_FLAGS = ['-application-extension', '-Xlinker', '-e', '-Xlinker', '_OinkFileProviderMain',
                             '-l', 'extension']
 

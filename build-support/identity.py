@@ -1,11 +1,28 @@
 #!/usr/bin/env python3
 """Shared release identity and remote signing configuration."""
 import json
+import os
 from pathlib import Path
+import re
 import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[1]
-IDENTITY = json.loads((ROOT / 'packaging/identity.json').read_text())
+
+
+def load_identity(environment=None):
+    identity = json.loads((ROOT / 'packaging/identity.json').read_text())
+    env = os.environ if environment is None else environment
+    version = env.get('OINK_PUBLIC_RELEASE_VERSION')
+    if version is not None:
+        pattern = r'(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)'
+        if (not isinstance(version, str) or re.fullmatch(pattern, version) is None or
+                tuple(map(int, version.split('.'))) < tuple(map(int, identity['version'].split('-')[0].split('.')))):
+            raise ValueError('public release version must be a plain numeric version at or above the source version')
+        identity['version'] = version
+    return identity
+
+
+IDENTITY = load_identity()
 
 
 def artifact_stem(version, platform, arch):

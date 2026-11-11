@@ -1,22 +1,14 @@
-name: Publish custom release
+name: Publish signed release
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
     inputs:
-      build:
-        description: Reserved product build for this custom release
-        required: true
-        default: '116'
-        type: string
-      release_tag:
-        description: New tag for the custom release
-        required: true
-        default: v0.3.5-custom.2
-        type: string
       arm_cross_compile:
         description: Build arm64 on Intel macOS without native ARM runtime checks
         required: true
-        default: false
+        default: true
         type: boolean
 
 permissions:
@@ -33,20 +25,51 @@ env:
   CMAKE_POLICY_VERSION_MINIMUM: '3.5'
 
 jobs:
+  prepare:
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.repository == 'Natsuneko3/oink' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    environment: release
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    outputs:
+      build: ${{ steps.version.outputs.build }}
+      release_tag: ${{ steps.version.outputs.release_tag }}
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.14.6'
+      - name: Verify release automation
+        run: |
+          python -m unittest discover -s packaging/tests -p 'test_custom_release_versions.py' -v
+          python -m unittest discover -s packaging/tests -p 'test_release_identity.py' -v
+          python -m unittest discover -s packaging/tests -p 'test_automatic_release.py' -v
+      - name: Reserve version and build number
+        id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python build-support/custom_release_versions.py --output "$RUNNER_TEMP/release-selection.json"
+
   package:
-    if: github.event_name == 'workflow_dispatch' && github.repository == 'Natsuneko3/oink' && github.ref == 'refs/heads/main'
+    needs: prepare
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.repository == 'Natsuneko3/oink' && github.ref == 'refs/heads/main'
     timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: ${{ inputs.arm_cross_compile && 'macos-15-intel' || 'macos-15' }}
+          - os: ${{ (github.event_name == 'push' || inputs.arm_cross_compile) && 'macos-15-intel' || 'macos-15' }}
             platform: macos
             stage_platform: macos
             arch: arm64
             target: aarch64-apple-darwin
-            host_arch: ${{ inputs.arm_cross_compile && 'x86_64' || 'arm64' }}
-            cross_compile: ${{ inputs.arm_cross_compile }}
+            host_arch: ${{ (github.event_name == 'push' || inputs.arm_cross_compile) && 'x86_64' || 'arm64' }}
+            cross_compile: ${{ github.event_name == 'push' || inputs.arm_cross_compile }}
             jobs: '2'
           - os: macos-15-intel
             platform: macos
@@ -69,6 +92,7 @@ jobs:
       contents: read
     env:
       CARGO_BUILD_JOBS: ${{ matrix.jobs }}
+      OINK_PUBLIC_RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
       OINK_REPORT_DSN: ''
       SENTRY_AUTH_TOKEN: ''
     steps:
@@ -110,10 +134,10 @@ jobs:
           MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_DEVELOPMENT_CERTIFICATE_PASSWORD }}
           MACOS_SIGNING_FINGERPRINT: ${{ vars.MACOS_DEVELOPMENT_SIGNING_FINGERPRINT }}
         run: python3 packaging/macos/ci-keychain.py --development
-      - name: Build and stage custom packages
+      - name: Build and stage signed packages
         shell: bash
         env:
-          BUILD: ${{ inputs.build }}
+          BUILD: ${{ needs.prepare.outputs.build }}
           PLATFORM: ${{ matrix.platform }}
           STAGE_PLATFORM: ${{ matrix.stage_platform }}
         run: |
@@ -131,25 +155,29 @@ jobs:
         run: python3 packaging/macos/ci-keychain.py cleanup
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: custom-package-${{ matrix.stage_platform }}-${{ inputs.build }}
+          name: release-package-${{ matrix.stage_platform }}-${{ needs.prepare.outputs.build }}
           path: ${{ runner.temp }}/distribution/*
           if-no-files-found: error
       - name: Preserve debug symbols separately
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: custom-symbols-${{ matrix.stage_platform }}-${{ inputs.build }}
+          name: release-symbols-${{ matrix.stage_platform }}-${{ needs.prepare.outputs.build }}
           path: ${{ runner.temp }}/packages/**/symbols.noindex/**
           include-hidden-files: true
           if-no-files-found: error
 
   publish:
-    needs: package
-    if: github.event_name == 'workflow_dispatch' && github.repository == 'Natsuneko3/oink' && github.ref == 'refs/heads/main'
+    needs: [prepare, package]
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.repository == 'Natsuneko3/oink' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     environment: release
     timeout-minutes: 15
     permissions:
       contents: write
+    env:
+      OINK_PUBLIC_RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+    outputs:
+      published: ${{ steps.release.outputs.published }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -161,20 +189,21 @@ jobs:
           python-version: '3.14.6'
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
-          pattern: custom-package-*-${{ inputs.build }}
+          pattern: release-package-*-${{ needs.prepare.outputs.build }}
           path: ${{ runner.temp }}/downloaded
       - name: Assemble matching assets and publish latest release
+        id: release
         env:
-          BUILD: ${{ inputs.build }}
-          RELEASE_TAG: ${{ inputs.release_tag }}
+          BUILD: ${{ needs.prepare.outputs.build }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
           GH_TOKEN: ${{ github.token }}
         run: |
           python build-support/custom_release.py assemble --downloads "$RUNNER_TEMP/downloaded" --build "$BUILD" --commit "$GITHUB_SHA" --output "$RUNNER_TEMP/release"
           python build-support/custom_release.py publish --output "$RUNNER_TEMP/release" --tag "$RELEASE_TAG" --notes .github/custom-release-notes.md
 
   update-feed:
-    needs: publish
-    if: github.event_name == 'workflow_dispatch' && github.repository == 'Natsuneko3/oink' && github.ref == 'refs/heads/main'
+    needs: [prepare, publish]
+    if: needs.publish.outputs.published == 'true' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.repository == 'Natsuneko3/oink' && github.ref == 'refs/heads/main'
     runs-on: macos-15-intel
     environment: release
     timeout-minutes: 30
@@ -187,7 +216,8 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       SPARKLE_ED25519_PRIVATE_KEY: ${{ secrets.SPARKLE_ED25519_PRIVATE_KEY }}
       WINDOWS_UPDATE_ED25519_PEM_WIN_2026_01: ${{ secrets.WINDOWS_UPDATE_ED25519_PEM_WIN_2026_01 }}
-      RELEASE_TAG: ${{ inputs.release_tag }}
+      RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
+      OINK_PUBLIC_RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
       OINK_FEED_LOCK: oink-update-feed-publish
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -207,7 +237,7 @@ jobs:
         run: |
           echo "$(brew --prefix openssl@3)/bin" >> "$GITHUB_PATH"
           "$(brew --prefix openssl@3)/bin/openssl" version | grep '^OpenSSL 3\.'
-      - name: Sign and publish custom update feeds
+      - name: Sign and publish update feeds
         id: feeds
         run: python3 build-support/update/custom_feed.py --release-tag "$RELEASE_TAG" --tool-cache "$RUNNER_TEMP/sparkle"
       - name: Recover hosted feed snapshot after interruption
