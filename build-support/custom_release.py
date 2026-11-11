@@ -135,6 +135,44 @@ def assemble(downloads, build, commit, output):
     (output / 'SHA256SUMS').write_text(''.join(f'{digest(p)}  {p.name}\n' for p in files))
 
 
+def verify_existing_assets(live, record, manifest):
+    import feed
+    packages = record['artifacts'] + [record['source_artifact']]
+    by_name = {a['name']: a for a in packages}
+    platform_assets = [a for p in record['platforms'].values() for a in p['artifacts']]
+    require(len(record['artifacts']) == 5 and len(by_name) == 6 and
+            sorted(platform_assets, key=lambda a: a['name']) == sorted(record['artifacts'], key=lambda a: a['name']) and
+            record['source_artifact']['name'] == f'Oink-{record["version"]}-build{record["build"]}-source.tar.gz',
+            'existing_release_inventory')
+    expected = {**by_name, 'release.json': {'size': len(manifest), 'sha256': feed.digest(manifest)}}
+    assets = {a['name']: a for a in live['assets']}
+    require(len(live['assets']) == 8 and set(assets) == set(expected) | {'SHA256SUMS'},
+            'existing_release_inventory')
+    checksums = None
+    for name, asset in assets.items():
+        require(re.fullmatch('[A-Za-z0-9_.-]+', name) and
+                asset.get('browser_download_url') ==
+                f'https://github.com/{REPOSITORY}/releases/download/{live["tag_name"]}/{name}' and
+                type(asset.get('size')) is int and 0 < asset['size'] <= feed.MAX_PACKAGE,
+                'existing_public_asset_metadata')
+        limit = feed.MAX_FEED if name in ('release.json', 'SHA256SUMS') else feed.MAX_PACKAGE
+        raw = manifest if name == 'release.json' else feed.download(asset['browser_download_url'], limit, True)
+        sha = feed.digest(raw)
+        require(len(raw) == asset['size'] and asset.get('digest') in (None, 'sha256:' + sha),
+                'existing_public_asset_digest')
+        if name in expected:
+            require(len(raw) == expected[name]['size'] and sha == expected[name]['sha256'],
+                    'existing_public_asset_digest')
+        else:
+            checksums = {}
+            for line in raw.decode().splitlines():
+                match = re.fullmatch(r'([0-9a-f]{64})  ([A-Za-z0-9_.-]+)', line)
+                require(match and match[2] not in checksums, 'existing_release_checksums')
+                checksums[match[2]] = match[1]
+    require(checksums == {name: asset['sha256'] for name, asset in expected.items()},
+            'existing_release_checksums')
+
+
 def publish(output, tag, notes):
     require(os.environ.get('GITHUB_ACTIONS') == 'true' and
             os.environ.get('GITHUB_REPOSITORY') == REPOSITORY and
@@ -178,6 +216,7 @@ def publish(output, tag, notes):
             validate(receipt, platform, record['build'], record['built_commit'], record['source_tree_sha256'])
             require(receipt.get('built_commit') == record['built_commit'] and receipt.get('custom_release') is True,
                     'existing_platform_provenance')
+        verify_existing_assets(live, existing, raw)
         print('This reserved Release is already public with matching provenance; keeping its original assets.')
         return True
     require(maximum < record['build'], 'release_build_already_published')

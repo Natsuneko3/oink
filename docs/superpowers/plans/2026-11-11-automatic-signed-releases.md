@@ -44,15 +44,15 @@
 
 **Interfaces:** Workflow preparation outputs supply `build`/`release_tag`/`version` to all downstream jobs. `publish` reports whether a current Release exists/was created, gating the feed job. `load_identity(environment)` validates the selected plain version without writing to source manifests.
 
-- [ ] Write failing tests for trusted push publication, source/tag mismatches, existing Release retries, superseded source, and committed-feed retry.
-- [ ] Enable main pushes and keep manual dispatch with automatic identifiers; wire preparation outputs and the current signer.
-- [ ] Extend trusted event checks, verify reserved tags and current main, and make completed publication safe to retry.
-- [ ] Run focused tests, the existing packaging suite, and workflow validation; commit the complete change.
+- [x] Write failing tests for trusted push publication, source/tag mismatches, existing Release retries, superseded source, and committed-feed retry.
+- [x] Enable main pushes and keep manual dispatch with automatic identifiers; wire preparation outputs and the current signer.
+- [x] Extend trusted event checks, verify reserved tags and current main, and make completed publication safe to retry.
+- [x] Run focused tests, the existing packaging suite, and workflow validation; commit the complete change.
 
 ### Task 3: Review and verify the deployed workflow
 
 **Files:** This plan/spec and external evidence under `/Volumes/NekoSSD/codex/2026-11-11/oink-auto-release`.
 
-- [ ] Independently review the immutable patch and fix material findings with tests.
+- [x] Independently review the immutable patch and fix material findings with tests.
 - [ ] Merge/push main as authorized, observing the push-triggered build without a manual dispatch.
 - [ ] Verify automatic identifiers, signer, GitHub artifact provenance, Release assets, and signed public feeds; record results.

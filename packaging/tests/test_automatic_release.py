@@ -1,6 +1,7 @@
 """Only a reserved main build can publish, and retries never overwrite releases."""
 import copy
 import importlib.util
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -127,10 +128,17 @@ class PublicationTests(unittest.TestCase):
 
     def existing(self, record=None):
         raw = json.dumps(record or self.record).encode()
-        url = f'https://github.com/Natsuneko3/oink/releases/download/{self.tag}/release.json'
+        self.public_bytes = {a['name']: (self.output / a['name']).read_bytes()
+                             for a in self.record['artifacts'] + [self.record['source_artifact']]}
+        self.public_bytes['release.json'] = raw
+        self.public_bytes['SHA256SUMS'] = ''.join(
+            f'{hashlib.sha256(data).hexdigest()}  {name}\n' for name, data in self.public_bytes.items()).encode()
+        prefix = f'https://github.com/Natsuneko3/oink/releases/download/{self.tag}/'
         self.live = {'tag_name': self.tag, 'draft': False, 'prerelease': False, 'published_at': '2026-11-11T00:00:00Z',
-                     'assets': [{'name': 'release.json', 'size': len(raw), 'browser_download_url': url}]}
-        return patch.object(feed, 'download', return_value=raw)
+                     'assets': [{'name': name, 'size': len(data), 'browser_download_url': prefix + name,
+                                 'digest': 'sha256:' + hashlib.sha256(data).hexdigest()}
+                                for name, data in self.public_bytes.items()]}
+        return patch.object(feed, 'download', side_effect=lambda url, *args: self.public_bytes[url.removeprefix(prefix)])
 
     def test_existing_matching_release_is_verified_without_overwriting_assets(self):
         with self.existing():
@@ -140,6 +148,34 @@ class PublicationTests(unittest.TestCase):
     def test_existing_release_with_different_provenance_is_rejected(self):
         with self.existing({**self.record, 'built_commit': 'c' * 40}), self.assertRaises(ValueError):
             publisher.publish(self.output, self.tag, Path('notes.md'))
+        self.command.assert_not_called()
+
+    def test_partial_public_release_cannot_report_a_successful_retry(self):
+        for missing in ('all_but_manifest', 'Oink-0.3.6-macos-arm64.dmg',
+                        'Oink-0.3.6-build117-source.tar.gz', 'SHA256SUMS'):
+            with self.subTest(missing=missing), self.existing():
+                self.live['assets'] = [a for a in self.live['assets'] if
+                    (a['name'] == 'release.json' if missing == 'all_but_manifest' else a['name'] != missing)]
+                with self.assertRaisesRegex(ValueError, 'existing_release_inventory'):
+                    publisher.publish(self.output, self.tag, Path('notes.md'))
+        self.command.assert_not_called()
+
+    def test_tampered_public_installer_is_rejected_without_overwrite(self):
+        with self.existing():
+            name = 'Oink-0.3.6-macos-arm64.dmg'
+            self.public_bytes[name] = b'X' + self.public_bytes[name][1:]
+            with self.assertRaisesRegex(ValueError, 'existing_public_asset_digest'):
+                publisher.publish(self.output, self.tag, Path('notes.md'))
+        self.command.assert_not_called()
+
+    def test_incorrect_checksums_are_rejected_even_when_the_api_digest_matches(self):
+        with self.existing():
+            self.public_bytes['SHA256SUMS'] = b'invalid checksums\n'
+            asset = next(a for a in self.live['assets'] if a['name'] == 'SHA256SUMS')
+            asset.update(size=len(self.public_bytes['SHA256SUMS']),
+                         digest='sha256:' + hashlib.sha256(self.public_bytes['SHA256SUMS']).hexdigest())
+            with self.assertRaisesRegex(ValueError, 'existing_release_checksums'):
+                publisher.publish(self.output, self.tag, Path('notes.md'))
         self.command.assert_not_called()
 
 

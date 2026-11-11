@@ -172,6 +172,9 @@ jobs:
     runs-on: ubuntu-24.04
     environment: release
     timeout-minutes: 15
+    concurrency:
+      group: oink-product-release-publish
+      cancel-in-progress: false
     permissions:
       contents: write
     env:
