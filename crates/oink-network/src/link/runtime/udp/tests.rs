@@ -94,9 +94,17 @@ async fn recovers(failure_kind: u8) {
             .send_datagram(bytes::Bytes::from_static(b"trigger send"))
             .unwrap();
     } else {
-        outbound
-            .send_datagram(bytes::Bytes::from_static(b"trigger recv"))
-            .unwrap();
+        // Wake the parked receive directly to observe the injected EPIPE. An
+        // application datagram used as a trigger may still be queued in Quinn
+        // when we rebind, then arrive on the replacement socket before reply.
+        let recv_wake = socket
+            .state
+            .lock()
+            .unwrap()
+            .recv_wake
+            .clone()
+            .expect("handshake must have polled the endpoint receive");
+        recv_wake.wake();
     }
     wake.notified().await;
     let replacement = socket
