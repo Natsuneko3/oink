@@ -1,6 +1,27 @@
 use oink_protocol::v1::{self, RawValue, cbor, frame, registry};
 use oink_test_support::protocol as support;
 use serde_json::Value;
+
+#[test]
+fn game_mode_local_input_is_optional_and_preserves_legacy_wire_bytes() {
+    use v1::{dto::ControlGameMode, schema::WireDto};
+    let bytes = support::unhex(include_str!("fixtures/v1/dto-ControlGameMode.hex").trim());
+    let legacy = ControlGameMode::decode(&bytes, v1::limits::LOW_FRAME).unwrap();
+    assert_eq!(legacy.local_input().unwrap(), None);
+    assert_eq!(legacy.encode(v1::limits::LOW_FRAME).unwrap(), bytes);
+    for enabled in [false, true] {
+        let mut raw = legacy.raw().clone();
+        raw.insert(7, RawValue::Bool(enabled));
+        let updated = ControlGameMode::from_raw(raw).unwrap();
+        let encoded = updated.encode(v1::limits::LOW_FRAME).unwrap();
+        let decoded = ControlGameMode::decode(&encoded, v1::limits::LOW_FRAME).unwrap();
+        assert_eq!(decoded.local_input().unwrap(), Some(enabled));
+        let mut invalid = decoded.into_raw();
+        invalid.insert(7, RawValue::Uint(1));
+        assert!(ControlGameMode::from_raw(invalid).is_err());
+    }
+}
+
 #[test]
 fn every_checked_in_vector_decodes_and_reencodes_identically() {
     let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/v1");

@@ -4762,6 +4762,12 @@
             "key": 6,
             "name": "cursor_hiding_cause_available",
             "shape": "Option<bool>"
+          },
+          {
+            "absence": "optional",
+            "key": 7,
+            "name": "local_input",
+            "shape": "Option<bool>"
           }
         ],
         "name": "ControlGameMode"
@@ -22478,6 +22484,12 @@
           "absence": "optional",
           "key": 6,
           "name": "cursor_hiding_cause_available",
+          "shape": "Option<bool>"
+        },
+        {
+          "absence": "optional",
+          "key": 7,
+          "name": "local_input",
           "shape": "Option<bool>"
         }
       ],
