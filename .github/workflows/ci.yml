@@ -100,6 +100,11 @@ jobs:
           if [[ "$RUNNER_OS" == Windows ]]; then export PATH="/c/Program Files/Git/usr/bin:$PATH"; fi
           openssl version
           python -m unittest discover -s packaging/tests -v
+      - name: Dependency policy
+        shell: bash
+        run: |
+          if ! cargo deny --version 2>/dev/null | grep -q '0.20.2$'; then cargo install cargo-deny --version 0.20.2 --locked; fi
+          cargo deny check
       - name: Rust formatting, all targets, integration and release parser tests
         shell: bash
         run: |
@@ -108,8 +113,3 @@ jobs:
       - name: Compile and inspect Windows MSI without installation
         if: runner.os == 'Windows'
         run: python build-support/package.py --public-version --platform windows --sequence 1 --output-root "${{ runner.temp }}/package-check"
-      - name: Dependency policy
-        shell: bash
-        run: |
-          if ! cargo deny --version 2>/dev/null | grep -q '0.20.2$'; then cargo install cargo-deny --version 0.20.2 --locked; fi
-          cargo deny check
