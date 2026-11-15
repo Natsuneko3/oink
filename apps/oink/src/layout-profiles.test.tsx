@@ -206,15 +206,18 @@ describe('creating a profile', () => {
     h.fixture.transport.call = call;
     await act(async () => { fireEvent.click(submit); });
     expect(h.of('create_layout_profile').map(r => r.params!.name)).toEqual(['Desk', 'Desk']);
-    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'New layout' })).toBeNull());
+    // jsdom does not run CSS transitions; complete the dialog's exit explicitly.
+    fireEvent.transitionEnd(dialog);
+    expect(screen.queryByRole('dialog', { name: 'New layout' })).toBeNull();
     expect(current().getAttribute('aria-label')).toBe('Current layout: Desk');
     expect(button('Undo').disabled).toBe(true);
   });
 
   it('disables + at sixteen profiles', async () => {
     const h = setup();
-    render(<App/>);
+    // Seed below the limit before mounting; only the 15 → 16 transition needs the live App.
     for (let i = 0; i < 14; i++) await create(h, `P${i}`);
+    render(<App/>);
     expect(button('New layout').disabled).toBe(false);
     await create(h, 'P14');
     expect(h.fixture.state().profiles).toHaveLength(16);
@@ -252,10 +255,15 @@ describe('Settings › Layout profiles', () => {
     fireEvent.click(within(row).getByRole('button', { name: 'Delete “Work”' }));
     const ask = await screen.findByRole('alertdialog', { name: 'Delete layout “Work”?' });
     fireEvent.click(within(ask).getByRole('button', { name: 'Cancel' }));
-    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
+    // jsdom does not emit the browser's transitionend event on its own.
+    fireEvent.transitionEnd(ask);
+    expect(screen.queryByRole('alertdialog')).toBeNull();
     expect(h.of('delete_layout_profile')).toHaveLength(0);
     fireEvent.click(within(row).getByRole('button', { name: 'Delete “Work”' }));
-    await act(async () => { fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Delete' })); });
+    const confirmDelete = await screen.findByRole('alertdialog');
+    await act(async () => { fireEvent.click(within(confirmDelete).getByRole('button', { name: 'Delete' })); });
+    fireEvent.transitionEnd(confirmDelete);
+    expect(screen.queryByRole('alertdialog')).toBeNull();
     await waitFor(() => expect(names(row)).toEqual(['Home']));
     expect(h.fixture.state().profiles[0].active).toBe(true);
     expect(h.of('load_layout_profile')).toHaveLength(0);
@@ -528,7 +536,8 @@ it('a screen context hides just that screen through the undoable manual edit bou
   const tile = container.querySelector<HTMLElement>('.scr')!;
   const label = tile.getAttribute('aria-label');
   fireEvent.contextMenu(tile, {clientX:100,clientY:100});
-  await act(async () => { fireEvent.click(await screen.findByRole('menuitem', {name:'Hide this screen'})); });
+  const hide = await screen.findByRole('menuitem', {name:'Hide this screen'});
+  await act(async () => { fireEvent.click(hide); });
   await h.settle();
   expect(h.of('commit_arrangement')).toHaveLength(1);
   const request = h.of('commit_arrangement')[0].params!;
@@ -555,7 +564,8 @@ it('one hidden screen turns the device item into show all, which unhides it in o
   adoptScreenActions();
   const {container} = render(<App/>);
   fireEvent.contextMenu(container.querySelector<HTMLElement>('.scr')!, {clientX:100,clientY:100});
-  await act(async () => { fireEvent.click(await screen.findByRole('menuitem', {name:'Hide this screen'})); });
+  const hide = await screen.findByRole('menuitem', {name:'Hide this screen'});
+  await act(async () => { fireEvent.click(hide); });
   await h.settle();
   const hiddenKey = (h.of('commit_arrangement')[0].params!.disabled as {screen: {device: string; display: string}}[])[0].screen;
   const card = () => container.querySelector(`[data-ctx="device:${hiddenKey.device}"]`)!;
@@ -585,7 +595,8 @@ it('show all screens turns device sharing back on together with hidden screens',
   const card = () => container.querySelector(`[data-ctx="device:${A}"]`)!;
   expect(card().querySelector('.dev__hidden')?.getAttribute('aria-label')).toBe('2 screens hidden');
   fireEvent.contextMenu(card(), {clientX:100,clientY:100});
-  await act(async () => { fireEvent.click(await screen.findByRole('menuitem', {name:'Show all screens'})); });
+  const show = await screen.findByRole('menuitem', {name:'Show all screens'});
+  await act(async () => { fireEvent.click(show); });
   await h.settle();
   const commits = h.of('commit_arrangement');
   expect(commits).toHaveLength(1);
