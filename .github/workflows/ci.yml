@@ -48,6 +48,7 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           key: ${{ matrix.target }}
+          cache-on-failure: true
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: '3.14.6'
@@ -93,17 +94,17 @@ jobs:
       - name: File Provider compile and pure tests
         if: runner.os == 'macOS'
         run: python packaging/macos/check.py --test
-      - name: Rust formatting, all targets, integration and release parser tests
-        shell: bash
-        run: |
-          cargo fmt --all --check
-          python build-support/ci.py
       - name: Packaging pure tests
         shell: bash
         run: |
           if [[ "$RUNNER_OS" == Windows ]]; then export PATH="/c/Program Files/Git/usr/bin:$PATH"; fi
           openssl version
           python -m unittest discover -s packaging/tests -v
+      - name: Rust formatting, all targets, integration and release parser tests
+        shell: bash
+        run: |
+          cargo fmt --all --check
+          python build-support/ci.py
       - name: Compile and inspect Windows MSI without installation
         if: runner.os == 'Windows'
         run: python build-support/package.py --public-version --platform windows --sequence 1 --output-root "${{ runner.temp }}/package-check"

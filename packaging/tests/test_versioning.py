@@ -272,6 +272,7 @@ class LocalVersions(unittest.TestCase):
                         '--output-root', temp, '--sequence', '1', '--signing-mode', mode,
                         '--development-cross-compile', '--tool-cache', str(Path(temp) / 'tools')]
                 with patch.dict(os.environ, {}, clear=True), patch.object(sys, 'argv', argv), \
+                        patch.object(module.Path, 'home', return_value=Path(temp)), \
                         patch.object(module.platform, 'system', return_value='Darwin'), \
                         patch.object(module.platform, 'machine', return_value='x86_64'), \
                         patch.object(signing, 'select_identity', return_value=IDENTITY['macos']['signing_fingerprint']) as select, \
