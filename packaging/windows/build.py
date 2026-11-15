@@ -286,7 +286,7 @@ def main():
     (symbols / 'manifest.json').write_text(json.dumps({'source_tree_sha256': a.source_tree_sha256,
                                                      'images': symbol_records}, indent=2) + '\n')
     if a.run_native_tests:
-        for test in ('AuthorizationTests', 'QuiescenceTests', 'MaintenanceCleanupTests', 'CloudFilesCleanupTests', 'FinishInstallTests', 'GracefulStopTests', 'RelaunchTests', 'UserDataCleanupTests', 'EmbeddedPowerShellTests'):
+        for test in ('AuthorizationTests', 'QuiescenceTests', 'MaintenanceCleanupTests', 'CloudFilesCleanupTests', 'FinishInstallTests', 'GracefulStopTests', 'RelaunchTests', 'UserDataCleanupTests', 'EmbeddedPowerShellTests', 'MicrophoneRestartTests'):
             run('cl.exe', '/nologo', '/EHsc', '/std:c++17', '/W4', '/WX', '/MT', ROOT / f'packaging/windows/{test}.cpp',
                 f'/Fo{a.output}/{test}.obj', f'/Fe{a.output}/{test}.exe', 'advapi32.lib', 'user32.lib')
             run(a.output / f'{test}.exe')
@@ -314,6 +314,8 @@ def main():
     (a.output / 'content-tables.json').write_text(json.dumps(tables, indent=2) + '\n')
     verify_extracted(a.output / 'decompiled.wxs', a.output / 'extracted')
     verify_cleanup(tables)
+    from content import verify_credential_provider_unregister
+    verify_credential_provider_unregister(tables)
     record['embedded_executables'] = verify_msi(a.output / 'decompiled.wxs', a.output / 'extracted', I, tables)
     record.update(product_code=product_code, msi_version=msi_version, signing='unsigned',
                   artifacts=[dict(name=msi.name, size=msi.stat().st_size, sha256=hashlib.sha256(msi.read_bytes()).hexdigest())])

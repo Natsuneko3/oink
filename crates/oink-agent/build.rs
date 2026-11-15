@@ -1,16 +1,38 @@
 fn main() {
-    sparkle();
     println!("cargo:rerun-if-changed=native/permissions.m");
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos") {
+        let identity: serde_json::Value = serde_json::from_str(include_str!("../../packaging/identity.json")).unwrap();
+        let trust: serde_json::Value = serde_json::from_str(include_str!("../../packaging/update-trust.json")).unwrap();
+        let team = identity["macos"]["team_id"].as_str().expect("Mac signing team");
+        let fingerprint = identity["macos"]["signing_fingerprint"]
+            .as_str()
+            .expect("Mac signing certificate");
+        assert!(team.len() == 10 && team.bytes().all(|b| b.is_ascii_alphanumeric()));
+        assert!(fingerprint.len() == 40 && fingerprint.bytes().all(|b| b.is_ascii_hexdigit()));
         cc::Build::new()
             .file("native/permissions.m")
             .file("native/local-update.m")
+            .define("OINK_SIGNING_TEAM", Some(format!("\"{team}\"").as_str()))
+            .define(
+                "OINK_DEVELOPMENT_FINGERPRINT",
+                Some(format!("\"{fingerprint}\"").as_str()),
+            )
+            .define(
+                "OINK_ALLOW_DEVELOPMENT_UPDATES",
+                if trust["mac"]["allow_development_updates"] == true {
+                    "1"
+                } else {
+                    "0"
+                },
+            )
             .flag("-fobjc-arc")
             .flag("-fblocks")
             .flag("-mmacosx-version-min=14.2")
             .warnings(true)
             .compile("oink_permissions");
         println!("cargo:rerun-if-changed=native/local-update.m");
+        println!("cargo:rerun-if-changed=../../packaging/identity.json");
+        println!("cargo:rerun-if-changed=../../packaging/update-trust.json");
         println!("cargo:rustc-link-lib=framework=Security");
         println!("cargo:rustc-link-lib=framework=Network");
         println!("cargo:rustc-link-lib=framework=Foundation");
@@ -37,28 +59,4 @@ fn main() {
         "OINK_SOURCE_TREE_SHA256 must be 64 lowercase hexadecimal characters"
     );
     println!("cargo:rustc-env=OINK_DIAGNOSTIC_SOURCE_TREE_SHA256={tree}");
-}
-
-fn sparkle() {
-    println!("cargo:rerun-if-changed=native/update.m");
-    println!("cargo:rerun-if-env-changed=SPARKLE_FRAMEWORK_DIR");
-    if std::env::var_os("CARGO_FEATURE_SPARKLE").is_none()
-        || std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("macos")
-    {
-        return;
-    }
-    let directory = std::env::var("SPARKLE_FRAMEWORK_DIR")
-        .expect("Sparkle feature requires the verified Sparkle 2.9.6 distribution directory");
-    cc::Build::new()
-        .file("native/update.m")
-        .flag("-fobjc-arc")
-        .flag("-fblocks")
-        .flag("-Werror")
-        .flag("-mmacosx-version-min=14.2")
-        .flag(format!("-F{directory}"))
-        .compile("oink_update_macos");
-    println!("cargo:rustc-link-search=framework={directory}");
-    println!("cargo:rustc-link-lib=framework=Sparkle");
-    println!("cargo:rustc-link-lib=framework=AppKit");
-    println!("cargo:rustc-link-arg=-Wl,-rpath,@executable_path/../Frameworks");
 }

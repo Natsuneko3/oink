@@ -22,7 +22,8 @@ class ReleaseIdentity(unittest.TestCase):
         self.assertNotIn('custom', selected['version'])
 
     def test_invalid_or_older_public_versions_are_rejected(self):
-        for version in ('', '0.0.1', '1.0.6-custom.1', '1.0.6\nunsafe', '01.0.6', '1.0'):
+        for version in ('', '0.0.1', '1.0.6-custom.1', '1.0.6\nunsafe', '01.0.6', '1.0',
+                        '0.3.100', '0.100.0', '214.74.84'):
             with self.subTest(version=version), self.assertRaises(ValueError):
                 identity.load_identity({'OINK_PUBLIC_RELEASE_VERSION': version})
 

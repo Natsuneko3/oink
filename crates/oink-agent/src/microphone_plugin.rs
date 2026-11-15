@@ -59,7 +59,8 @@ pub struct MicrophonePluginStatus {
     pub step: Option<MicrophonePluginStep>,
     #[serde(default)]
     pub restart_required: bool,
-    /// Last successful operation: Windows reboot lifetime, macOS process lifetime.
+    /// Last successful operation. Windows: only while a restart is owed (the
+    /// volatile restart marker names it), otherwise null. macOS: process lifetime.
     #[serde(default)]
     pub last_operation: Option<Action>,
     pub step_started_at_ms: Option<u64>,
@@ -611,7 +612,10 @@ mod macos {
         verify_bundle: impl Fn(&Path, &str, bool) -> Result<(), String>,
     ) -> Result<bool, InspectionError> {
         let mut present = false;
-        for (path, requirement) in [(destination, INSTALLED_PLUGIN_REQUIREMENT), (legacy, LEGACY_PLUGIN_REQUIREMENT)] {
+        for (path, requirement) in [
+            (destination, INSTALLED_PLUGIN_REQUIREMENT),
+            (legacy, LEGACY_PLUGIN_REQUIREMENT),
+        ] {
             match std::fs::symlink_metadata(path) {
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
                 Err(error) => return Err(InspectionError::query(error.to_string())),

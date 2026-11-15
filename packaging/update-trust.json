@@ -1,6 +1,9 @@
 {
   "schema": 1,
   "repository": "Natsuneko3/oink",
+  "sources": [
+    "https://github.com/Natsuneko3/oink/releases/download/update-feed"
+  ],
   "windows": [
     {
       "epoch": "win-2026-01",

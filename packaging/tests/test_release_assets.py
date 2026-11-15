@@ -44,9 +44,10 @@ class ReleaseAssetsTests(unittest.TestCase):
             self.release = {**payload, 'id': 7}
             return copy.deepcopy(self.release)
         if '/releases/7/assets?' in path:
+            self.asset_ids = {i: name for i, name in enumerate(self.assets, 1)}
             return [{'id': i, 'name': name} for i, name in enumerate(self.assets, 1)]
         if '/releases/assets/' in path and method == 'DELETE':
-            del self.assets[list(self.assets)[int(path.rsplit('/', 1)[1]) - 1]]
+            del self.assets[self.asset_ids[int(path.rsplit('/', 1)[1])]]
             return None
         if path.endswith('/git/ref/heads/update-feed-state'):
             return self.branch
@@ -80,6 +81,23 @@ class ReleaseAssetsTests(unittest.TestCase):
         self.assertNotIn('windows-v1-win-2026-01-stable-manifest.json', self.assets)
         self.assertEqual(self.assets['user-notes.txt'], b'keep')
         self.assertEqual(self.assets['index.html'], (self.state / 'site/index.html').read_bytes())
+
+    def test_v2_catalogs_and_mac_receipts_upload_flat_and_are_removed_on_rollback(self):
+        paths = ['windows/v2/win-2026-01/x64/stable/manifest.json',
+                 'mac/v2/mac-2026-01/arm64/beta/manifest.json',
+                 'mac/v2/mac-2026-01/x64/stable/manifest.json', 'mac/releases/307001/arm64.json']
+        for index, path in enumerate(paths):
+            feed.write(self.state / 'site' / path, b'signed metadata ' + str(index).encode())
+        with patch.object(feed_site, 'verify_all'):
+            hosting.publish(self.state)
+        for path in paths:
+            self.assertEqual(self.assets[feed.asset_name(path)], (self.state / 'site' / path).read_bytes())
+            self.assertTrue(hosting.managed_asset(feed.asset_name(path)))
+            (self.state / 'site' / path).unlink()
+        self.assets['mac-releases-307001-other.json'] = b'unrelated'
+        hosting.publish(self.state)
+        self.assertTrue(all(feed.asset_name(path) not in self.assets for path in paths))
+        self.assertEqual(self.assets['mac-releases-307001-other.json'], b'unrelated')
 
     def test_bootstrap_refuses_to_reset_an_existing_live_snapshot(self):
         registry = feed.registry(self.state)

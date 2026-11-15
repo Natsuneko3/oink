@@ -127,7 +127,7 @@ jobs:
           path: |
             ~/.cargo/bin/cargo-about*
             ${{ runner.temp }}/package-tools
-          key: custom-release-tools-${{ runner.os }}-${{ runner.arch }}-rust1.99.0-about0.9.2-wix5.0.2-sparkle2.9.6
+          key: custom-release-tools-${{ runner.os }}-${{ runner.arch }}-rust1.99.0-about0.9.2-wix5.0.2-dmgbuild1.6.7
       - name: Pin build tools
         run: |
           test "$(uname -m)" = arm64

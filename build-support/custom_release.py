@@ -186,8 +186,7 @@ def publish(output, tag, notes):
     sys.path.insert(0, str(ROOT / 'build-support/update'))
     import release_assets
     from custom_release_versions import tag_reservation, latest_published_build
-    latest = release_assets.request(f'repos/{REPOSITORY}/git/ref/heads/main')
-    if latest['object'].get('type') != 'commit' or latest['object'].get('sha') != record['built_commit']:
+    if not release_assets.current_main(record['built_commit']):
         print('Main has advanced; this superseded build will not publish a Release or update feeds.')
         return False
     reservation = tag_reservation(tag, release_assets.request)
@@ -225,6 +224,9 @@ def publish(output, tag, notes):
         path = output / asset['name']
         require(path.stat().st_size == asset['size'] and digest(path) == asset['sha256'], 'final_asset_digest')
     files = [output / a['name'] for a in assets] + [output / 'release.json', output / 'SHA256SUMS']
+    if not release_assets.current_main(record['built_commit']):
+        print('Main advanced during validation; this superseded Release will not be uploaded.')
+        return False
     subprocess.run(['gh', 'release', 'create', tag, '--repo', REPOSITORY,
                     '--verify-tag', '--target', record['built_commit'], '--latest', '--title', f'Oink {tag}',
                     '--notes-file', str(notes), *map(str, files)], cwd=ROOT, check=True)

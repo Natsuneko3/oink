@@ -15,10 +15,12 @@ sys.path[:0] = [str(ROOT / 'packaging/macos'), str(ROOT / 'build-support')]
 SPEC = importlib.util.spec_from_file_location('macos_manifest_content', ROOT / 'packaging/macos/content.py')
 C = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(C)
-from identity import IDENTITY
+from identity import IDENTITY, encode_build
 from native_image_fixtures import GUID, macho_image
 from report_manifest import image_identity, write_manifest
 from versioning import macos_version_fields, release_version
+
+BUILD = encode_build(IDENTITY['inhouse_version'], 37)
 
 
 class MacManifestRoles(unittest.TestCase):
@@ -43,11 +45,11 @@ class MacManifestRoles(unittest.TestCase):
             data = macho_image()
             self.assertEqual(data.count(GUID.bytes), 1)
             path.write_bytes(data.replace(GUID.bytes, uuid.uuid5(uuid.NAMESPACE_DNS, role).bytes))
-        version = release_version(IDENTITY['version'], 'b' * 40, 137)
-        self.metadata = {'version': version, 'build': 137, 'source_commit': 'b' * 40,
-                         'source_tree_sha256': 'a' * 64, 'update_policy': 'sparkle'}
+        version = release_version(IDENTITY['version'], 'b' * 40, BUILD)
+        self.metadata = {'version': version, 'build': BUILD, 'source_commit': 'b' * 40,
+                         'source_tree_sha256': 'a' * 64}
         trust = json.loads((ROOT / 'packaging/update-trust.json').read_text())['mac']
-        self.metadata['update_policy'] = 'sparkle' if trust['enabled'] else 'manual-only'
+        self.metadata['update_policy'] = 'feed-v2' if trust['enabled'] else 'manual-only'
         for bundle, ident, executable in [
                 (self.app, IDENTITY['bundle_id'], self.b['backend']),
                 (self.helper, self.mac['ui_id'], self.b['ui']),
@@ -58,8 +60,8 @@ class MacManifestRoles(unittest.TestCase):
                         CFBundleName='Oink', CFBundleDisplayName='Oink',
                         LSMinimumSystemVersion='14.2', NSAudioCaptureUsageDescription='Share audio.',
                         NSExtension={'NSExtensionPointIdentifier': 'com.apple.FinderSync'},
-                        **macos_version_fields(version, 137))
-            if trust['public_key']:
+                        **macos_version_fields(version, BUILD))
+            if bundle == self.app and trust['public_key']:
                 info['SUPublicEDKey'] = trust['public_key']
             info[self.mac['app_group_key']] = self.group
             (bundle / 'Contents').mkdir(parents=True, exist_ok=True)
@@ -67,17 +69,16 @@ class MacManifestRoles(unittest.TestCase):
         resource = self.app / 'Contents/Resources'; resource.mkdir()
         (resource / IDENTITY['metadata_file']).write_text(json.dumps(self.metadata))
         (self.helper / 'Contents/Resources').mkdir()
-        (self.app / 'Contents/Frameworks/Sparkle.framework').mkdir(parents=True)
         self.set_report(['backend', 'agent', 'ui', 'file_provider_extension'])
 
     def set_report(self, roles):
         manifest = self.app / 'Contents/Resources/report-manifest.json'
-        write_manifest(manifest, 'a' * 64, self.metadata['version'], 137,
+        write_manifest(manifest, 'a' * 64, self.metadata['version'], BUILD,
                        list(zip(['agent', 'agent', 'ui_rust', 'file_provider'],
                                 [self.images[k] for k in roles])))
         (self.helper / 'Contents/Resources/report-manifest.json').write_bytes(manifest.read_bytes())
 
-    def check(self):
+    def check(self, **options):
         group_paths = {self.app, self.images['backend'], self.images['file_provider_manager'],
                        self.extension, self.images['file_provider_extension'], self.finder,
                        self.images['finder_sync'], self.paste, self.images['paste_helper']}
@@ -93,9 +94,36 @@ class MacManifestRoles(unittest.TestCase):
             raise AssertionError(args)
         with patch.object(C, 'private_run', side_effect=signed), \
                 patch.object(C.subprocess, 'check_output', side_effect=native), \
-                patch.object(C, 'verify_signature'), patch.object(C, 'verify_imports'), \
+                patch.object(C, 'verify_signature') as signatures, patch.object(C, 'verify_imports'), \
                 patch.object(C, 'verify_localizations'), patch.object(C, 'verify_microphone'):
-            return C.verify_app(self.app, IDENTITY)
+            components = C.verify_app(self.app, IDENTITY, **options)
+            self.signature_calls = signatures.call_args_list
+            return components
+
+    def test_sparkle_free_bundle_preserves_all_signing_modes(self):
+        for mode in ('developer-id', 'apple-development', 'ad-hoc'):
+            with self.subTest(mode=mode):
+                development = mode != 'developer-id'
+                self.metadata.update(signing=mode, development_signing=development)
+                (self.app / 'Contents/Resources' / IDENTITY['metadata_file']).write_text(json.dumps(self.metadata))
+                self.assertEqual(len(self.check(development_signing=development,
+                    apple_development=mode == 'apple-development')), 8)
+                if mode == 'apple-development':
+                    self.assertEqual(len(self.signature_calls), 9)
+                    for call in self.signature_calls:
+                        self.assertEqual(call.args[1], self.mac['team_id'])
+                        self.assertEqual(call.kwargs, {'apple_development': True,
+                            'fingerprint': self.mac['signing_fingerprint']})
+                elif mode == 'ad-hoc':
+                    self.assertEqual(self.signature_calls[-1].args, (self.app, None))
+                    self.assertEqual(self.signature_calls[-1].kwargs, {'development_signing': True})
+                else:
+                    self.assertEqual(self.signature_calls[-1].args, (self.app, self.mac['team_id']))
+
+    def test_removed_sparkle_framework_cannot_reenter_the_bundle(self):
+        (self.app / 'Contents/Frameworks/Sparkle.framework').mkdir(parents=True)
+        with self.assertRaisesRegex(RuntimeError, 'must not embed frameworks'):
+            self.check()
 
     def test_extra_finder_and_paste_components_do_not_replace_report_roles(self):
         components = self.check()

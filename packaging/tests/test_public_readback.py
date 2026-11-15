@@ -8,6 +8,20 @@ import feed
 import readback
 
 class ReadbackTests(unittest.TestCase):
+    def test_v2_release_assets_share_one_canonical_readback_round(self):
+        paths = ['windows/v2/win-2026-01/x64/stable/manifest.json',
+                 'mac/v2/mac-2026-01/arm64/stable/manifest.json',
+                 'mac/releases/307001/arm64.json']
+        expected = {path: path.encode() for path in paths}
+        urls = {feed.public_url(path): raw for path, raw in expected.items()}
+        with patch.object(feed, 'download', side_effect=lambda url, *args: urls[url]) as download, \
+                patch.object(readback, 'log'):
+            readback.verify(expected, {path: None for path in paths})
+        self.assertEqual({call.args[0] for call in download.call_args_list}, set(urls))
+        self.assertEqual(set(urls), {feed.BASE + name for name in (
+            'windows-v2-win-2026-01-x64-stable-manifest.json',
+            'mac-v2-mac-2026-01-arm64-stable-manifest.json', 'mac-releases-307001-arm64.json')})
+
     def test_nested_feed_reads_exact_fork_release_asset_with_https_redirects(self):
         path = 'windows/v1/win-2026-01/stable/manifest.json'
         url = 'https://github.com/Natsuneko3/oink/releases/download/update-feed/windows-v1-win-2026-01-stable-manifest.json'

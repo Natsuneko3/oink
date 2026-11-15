@@ -12,6 +12,8 @@ import readback
 
 STATE = Path('feed-state')
 NEXT = Path('next-state')
+# Each source must be served by this same rollback-capable transaction.
+DEPLOY_TARGETS = {feed.BASE.rstrip('/'): 'github-release'}
 
 
 def git(*args):
@@ -22,6 +24,7 @@ def prepare():
     platform = os.environ['PLATFORM']
     proposal = feed.read(Path('candidate-state/candidate.json'))
     feed.require(platform in feed_site.PLATFORMS and proposal['platform'] == platform, 'candidate_platform')
+    feed.require(all(origin in DEPLOY_TARGETS for origin in feed.sources(feed.trust(platform))), 'source_without_deploy_target')
     reg = feed_site.state_info(STATE)
     # The archived rollback must itself be a valid signed snapshot before any
     # new site is deployed; it is not merely a copy of untrusted branch bytes.
@@ -72,7 +75,9 @@ def verify_rollback():
         expected[path] = None
     # Reverse the same verified transition: frozen parent is the target and
     # the candidate may still be visible while Release CDN caches converge.
-    readback.verify(expected, feed_site.files(NEXT / 'site'), 'rollback_digest')
+    candidate = feed_site.files(NEXT / 'site')
+    expected.update({path: None for path in candidate if path not in expected})
+    readback.verify(expected, candidate, 'rollback_digest')
 
 
 def main():

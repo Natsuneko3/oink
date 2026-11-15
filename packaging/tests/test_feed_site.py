@@ -27,7 +27,7 @@ class SiteTests(unittest.TestCase):
         self.secret = patch.dict(os.environ, {feed.KEY_ENV[EPOCH['epoch']]: PEM, 'OINK_UPDATE_QUALIFIED_BUILD': '2'})
         self.secret.start()
         self.addCleanup(self.secret.stop)
-        self.config = {'schema': 1, 'repository': 'Natsuneko3/oink', 'windows': [EPOCH],
+        self.config = {'schema': 1, 'repository': 'Natsuneko3/oink', 'sources': [feed.BASE[:-1]], 'windows': [EPOCH],
                        'mac': {'epoch': 'mac-2026-01', 'enabled': True, 'public_key': PUB}}
         self.trust = patch.object(feed, 'trust', return_value=self.config)
         self.trust.start()
@@ -237,6 +237,7 @@ class SiteTests(unittest.TestCase):
         thread.start()
         try:
             with patch.object(feed, 'BASE', f'http://localhost:{server.server_port}/'):
+                self.config['sources'] = [feed.BASE.rstrip('/')]
                 feed_site.verify_public(windows_state)
                 self.assertEqual(cache['heartbeat.json'], active['heartbeat.json'])
                 active = {feed.asset_name(path): raw for path, raw in feed_site.files(mac_state / 'site').items()}
@@ -465,7 +466,7 @@ class SiteTests(unittest.TestCase):
 
 class TrustTests(unittest.TestCase):
     def test_disabled_is_explicit_and_enabled_missing_roots_is_an_error(self):
-        config = {'schema': 1, 'repository': 'Natsuneko3/oink',
+        config = {'schema': 1, 'repository': 'Natsuneko3/oink', 'sources': [feed.BASE[:-1]],
                   'windows': [{**copy.deepcopy(EPOCH), 'enabled': False, 'public_key': PUB}],
                   'mac': {'epoch': 'mac-2026-01', 'enabled': False, 'public_key': PUB}}
         with tempfile.TemporaryDirectory() as directory:

@@ -15,6 +15,7 @@ import tempfile
 
 import feed
 import feed_site
+import feed_v2
 
 PREFIX = f'repos/{feed.REPOSITORY}'
 STATE_BRANCH = 'update-feed-state'
@@ -41,6 +42,11 @@ def request(path, method='GET', payload=None, missing=False):
         return None
     feed.require(result.returncode == 0 and 200 <= code < 300, 'release_api_failed')
     return json.loads(body) if body.strip() else None
+
+
+def current_main(commit):
+    reference = request(f'{PREFIX}/git/ref/heads/main')
+    return reference.get('object', {}).get('type') == 'commit' and reference['object'].get('sha') == commit
 
 
 def ensure_release():
@@ -74,6 +80,8 @@ def managed_asset(name):
     return (name in ('index.html', 'heartbeat.json') or
             re.fullmatch(r'mac-v1-mac-2026-01-(?:x64-)?(?:stable|beta)-appcast\.xml', name) is not None or
             re.fullmatch(r'windows-v1-win-2026-01-(?:stable|beta)-manifest\.json', name) is not None or
+            re.fullmatch(r'(?:windows-v2-win-[0-9]{4}-[0-9]{2}-x64|mac-v2-mac-2026-01-(?:arm64|x64))-(?:stable|beta)-manifest\.json', name) is not None or
+            re.fullmatch(r'mac-releases-[1-9][0-9]*-(?:arm64|x64)\.json', name) is not None or
             re.fullmatch(r'windows-releases-[1-9][0-9]*-release\.json', name) is not None)
 
 
@@ -85,6 +93,7 @@ def snapshot_assets(state):
         allowed = (path in ('index.html', 'heartbeat.json') or
                    re.fullmatch(r'mac/v1/mac-2026-01/(?:x64/)?(?:stable|beta)/appcast\.xml', path) or
                    re.fullmatch(r'windows/v1/win-2026-01/(?:stable|beta)/manifest\.json', path) or
+                   feed_v2.PATH.fullmatch(path) or feed_v2.MAC_RECORD.fullmatch(path) or
                    re.fullmatch(r'windows/releases/[1-9][0-9]*/release\.json', path))
         feed.require(allowed and name not in result, 'release_asset_path')
         result[name] = raw

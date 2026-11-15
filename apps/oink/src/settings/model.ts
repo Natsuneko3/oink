@@ -78,6 +78,9 @@ export function usePreferences(): PrefsApi {
   const [prefs,setPrefs] = useState(DEFAULT_PREFS);
   const [presentation,setPresentation] = useState(readPresentation);
   const [transform,setTransform] = useState<InputTransform|null>(null);
+  // The keymap is editable only once prefs show the loaded transform: the
+  // effect below decodes it one render after it arrives.
+  const [shownTransform,setShownTransform] = useState<InputTransform|null>(null);
   const report=state.report;
   const [pending,setPending] = useState(false);
   const busy = useRef(false), queued = useRef<Prefs|null>(null), committed = useRef(prefs), latest = useRef(prefs);
@@ -96,7 +99,7 @@ export function usePreferences(): PrefsApi {
     setPrefs(p=>{
       const next:Prefs={...p,
         ...(local?{notificationLevel:local.notification_level,showInMenuBar:local.show_status_icon,confirmQuit:local.confirm_quit,pasteAsFile:local.paste_as_file,language:local.ui_language,logLevel:local.log_level,logMaxMb:String(local.log_max_mb)}:{}),
-        ...(state.input?{pollLimit:state.input.event_frequency==='hz125'?'125':'none',keepAwake:state.input.wake_displays_on_input,pointerTrail:state.input.cursor_trail,touchpadInject:state.input.touchpad_injection_enabled,nativeMultifinger:state.input.native_multifinger??true,macScrollFeel:state.input.mac_scroll_feel,forwardWheelByLines:state.input.forward_wheel_by_lines??true,forwardInjectedInput:state.input.forward_injected_input??true,gameModeLocalInput:state.input.game_mode_local_input??false,takeForegroundOnLeave:state.input.take_foreground_on_leave??false,quickerCompat:state.input.quicker_compat??false,syncUnlock:state.input.sync_unlock_others??false,pointerGain:state.input.device_gain,escStop:state.input.emergency_hold_ms!==0,
+        ...(state.input?{pollLimit:state.input.event_frequency==='unlimited'?'none':state.input.event_frequency.slice(2) as Prefs['pollLimit'],keepAwake:state.input.wake_displays_on_input,pointerTrail:state.input.cursor_trail,touchpadInject:state.input.touchpad_injection_enabled,nativeMultifinger:state.input.native_multifinger??true,macScrollFeel:state.input.mac_scroll_feel,forwardWheelByLines:state.input.forward_wheel_by_lines??true,forwardInjectedInput:state.input.forward_injected_input??true,gameModeLocalInput:state.input.game_mode_local_input??false,takeForegroundOnLeave:state.input.take_foreground_on_leave??false,quickerCompat:state.input.quicker_compat??false,syncUnlock:state.input.sync_unlock_others??false,pointerGain:state.input.device_gain,escStop:state.input.emergency_hold_ms!==0,
           shortcuts:{...Object.fromEntries(Object.entries(p.shortcuts).filter(([id])=>!id.startsWith('move:'))),...Object.fromEntries(state.input.hotkeys.filter(h=>shortcutId(h)).map(h=>[shortcutId(h),{on:h.enabled,keys:h.keys.map(k=>k==='Ctrl'?'Control':k).join('+')}]))}} as const:{}),
         ...(state.clipboard?{clipReceive:state.clipboard.receive ?? true,clipSend:state.clipboard.send ?? true,clipDedupe:state.clipboard.dedupe ?? true,removeDsStore:state.clipboard.remove_ds_store ?? true}:{}),
         ...(state.audio?{audioEncodingQuality:state.audio.settings.quality??'quality',keepLocalPlayback:state.audio.settings.keep_local_playback,audioDevice:state.audio.settings.receive_output??'default'}:{}),
@@ -113,6 +116,7 @@ export function usePreferences(): PrefsApi {
     setPrefs(p=>{const next={...p,keyPreset:decoded.keyPreset,scrollInvert:transform[platform==='mac'?'macos':'windows'].reverse_wheel,capsSplit:decoded.capsSplit,allowFnMapping:decoded.allowFnMapping,
       keyCustom:{...p.keyCustom,[platform]:decoded.map},keyCustomTouched:{...p.keyCustomTouched,[platform]:decoded.hasCustom}};
       committed.current=next;return next;});
+    setShownTransform(transform);
   },[transform,platform,pending]);
   const save = async(next:Prefs):Promise<void>=>{
     setPrefs(next);
@@ -127,7 +131,7 @@ export function usePreferences(): PrefsApi {
       if((['pollLimit','keepAwake','pointerTrail','touchpadInject','nativeMultifinger','macScrollFeel','forwardWheelByLines','forwardInjectedInput','gameModeLocalInput','takeForegroundOnLeave','quickerCompat','syncUnlock','escStop','pointerGain','shortcuts'] as const).some(changed)){
         if(!current.input)throw new Error('unavailable');
         await api.setInputSettings({
-          ...(changed('pollLimit')?{event_frequency:next.pollLimit==='125'?'hz125':'unlimited'}:{}),
+          ...(changed('pollLimit')?{event_frequency:next.pollLimit==='none'?'unlimited':`hz${next.pollLimit}`}:{}),
           ...(changed('keepAwake')?{wake_displays_on_input:next.keepAwake}:{}),
           ...(changed('pointerTrail')?{cursor_trail:next.pointerTrail}:{}),
           ...(changed('touchpadInject')?{accept_contacts:next.touchpadInject}:{}),
@@ -171,7 +175,7 @@ export function usePreferences(): PrefsApi {
   };
   return{prefs,pending,launchStatus:state.launch,canEdit: key => {
       if(['pasteAsFile','language','showInMenuBar','confirmQuit','notificationLevel','logLevel','logMaxMb','theme','accent'].includes(key))return local!==null;
-      if(['keymap','scrollInvert'].includes(key))return transform!==null;
+      if(['keymap','scrollInvert'].includes(key))return shownTransform!==null;
       if(['pollLimit','pointerGain','keepAwake','pointerTrail','touchpadInject','nativeMultifinger','macScrollFeel','forwardWheelByLines','forwardInjectedInput','gameModeLocalInput','takeForegroundOnLeave','quickerCompat','syncUnlock','escStop'].includes(key)||key.startsWith('sc-'))return state.input!==null;
       if(key.startsWith('clip')||key==='removeDsStore')return state.clipboard!==null;
       if(['audioEncodingQuality','audioDevice','keepLocalPlayback'].includes(key))return state.audio!==null;

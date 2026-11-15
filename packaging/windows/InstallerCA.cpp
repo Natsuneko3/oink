@@ -486,6 +486,102 @@ extern "C" __declspec(dllexport) UINT __stdcall CheckProtectedState(MSIHANDLE in
     return valid ? ERROR_SUCCESS : fail(install, 10);
 }
 
+// Deferred SYSTEM action on standalone uninstall (issue #46). The protected
+// service image owns the removal of the auto unlock vault and the credential
+// provider registration; this action runs it and copies its exit code and
+// stderr into the MSI log, which an EXE custom action never does (0.3.5 logged
+// only "returned actual error code 1"). A non-zero exit stays fatal: the
+// uninstall must not leave the provider or the stored password behind.
+static void log_text(MSIHANDLE install, INSTALLMESSAGE kind, const std::wstring& text) {
+    // Field 1 is substituted verbatim; the CLSID braces in the text are not
+    // reinterpreted as MSI format groups.
+    MSIHANDLE record = MsiCreateRecord(1);
+    if (!record) return;
+    MsiRecordSetStringW(record, 0, L"[1]");
+    MsiRecordSetStringW(record, 1, text.c_str());
+    MsiProcessMessage(install, kind, record);
+    MsiCloseHandle(record);
+}
+
+static std::wstring widen_output(const std::string& bytes) {
+    // Rust writes UTF-8 to a redirected stderr.
+    std::wstring text;
+    if (!bytes.empty()) {
+        const int size = MultiByteToWideChar(CP_UTF8, 0, bytes.data(), static_cast<int>(bytes.size()), nullptr, 0);
+        text.resize(size > 0 ? static_cast<size_t>(size) : 0);
+        if (size > 0) MultiByteToWideChar(CP_UTF8, 0, bytes.data(), static_cast<int>(bytes.size()), text.data(), size);
+    }
+    while (!text.empty() && (text.back() == L'\n' || text.back() == L'\r' || text.back() == L' ')) text.pop_back();
+    for (auto& c : text) if (c == L'\r' || c == L'\n') c = L' ';
+    return text;
+}
+
+// Returns false with a reason when the process could not be run at all.
+static bool run_captured(const std::wstring& executable, const std::wstring& arguments, const std::wstring& directory,
+                         DWORD& exit_code, std::string& output, std::wstring& reason) {
+    SECURITY_ATTRIBUTES inherit{sizeof(inherit), nullptr, TRUE};
+    HANDLE read = nullptr, write = nullptr;
+    if (!CreatePipe(&read, &write, &inherit, 0)) { reason = L"CreatePipe error " + std::to_wstring(GetLastError()); return false; }
+    SetHandleInformation(read, HANDLE_FLAG_INHERIT, 0);
+    // Inherit only the pipe's write end, as stdout and stderr.
+    SIZE_T size = 0;
+    InitializeProcThreadAttributeList(nullptr, 1, 0, &size);
+    std::vector<BYTE> list(size);
+    auto attributes = reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(list.data());
+    const bool initialized = InitializeProcThreadAttributeList(attributes, 1, 0, &size) != FALSE;
+    bool ok = initialized &&
+        UpdateProcThreadAttribute(attributes, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST, &write, sizeof(write), nullptr, nullptr);
+    STARTUPINFOEXW startup{};
+    startup.StartupInfo.cb = sizeof(startup);
+    startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+    startup.StartupInfo.hStdOutput = write;
+    startup.StartupInfo.hStdError = write;
+    startup.lpAttributeList = attributes;
+    PROCESS_INFORMATION child{};
+    std::wstring command = L"\"" + executable + L"\" " + arguments;
+    if (ok) ok = CreateProcessW(executable.c_str(), command.data(), nullptr, nullptr, TRUE,
+                                CREATE_NO_WINDOW | EXTENDED_STARTUPINFO_PRESENT, nullptr, directory.c_str(),
+                                &startup.StartupInfo, &child) != FALSE;
+    if (!ok) reason = L"CreateProcess error " + std::to_wstring(GetLastError());
+    if (initialized) DeleteProcThreadAttributeList(attributes);
+    CloseHandle(write);
+    if (ok) {
+        char buffer[4096];
+        DWORD n = 0;
+        while (ReadFile(read, buffer, sizeof(buffer), &n, nullptr) && n) output.append(buffer, n);
+        WaitForSingleObject(child.hProcess, INFINITE);
+        ok = GetExitCodeProcess(child.hProcess, &exit_code) != FALSE;
+        if (!ok) reason = L"GetExitCodeProcess error " + std::to_wstring(GetLastError());
+        CloseHandle(child.hThread);
+        CloseHandle(child.hProcess);
+    }
+    CloseHandle(read);
+    return ok;
+}
+
+extern "C" __declspec(dllexport) UINT __stdcall UnregisterCredentialProvider(MSIHANDLE install) {
+    const auto directory = root();
+    const auto executable = directory + L"\\" ID_SERVICE_EXE;
+    DWORD code = 0;
+    std::string output;
+    std::wstring reason;
+    bool ran = false;
+    if (directory.empty()) reason = L"Program Files folder unavailable";
+    else if (!protected_path(executable)) reason = executable + L" is not a protected installed image";
+    else ran = run_captured(executable, L"--unregister-credential-provider", directory, code, output, reason);
+    const auto text = widen_output(output);
+    if (ran) {
+        log_text(install, INSTALLMESSAGE_INFO, L"UnregisterCredentialProvider: " ID_SERVICE_EXE L" exited with " +
+            std::to_wstring(code) + (text.empty() ? std::wstring() : L": " + text));
+        if (code == 0) return ERROR_SUCCESS;
+    } else {
+        log_text(install, INSTALLMESSAGE_INFO, L"UnregisterCredentialProvider: could not run " ID_SERVICE_EXE L": " + reason);
+    }
+    log_text(install, INSTALLMESSAGE_ERROR, L"Oink could not remove its sign-in component (auto unlock). " +
+        (ran ? (text.empty() ? L"Exit code " + std::to_wstring(code) : text) : reason));
+    return ERROR_INSTALL_FAILURE;
+}
+
 // Post-removal cleanup is best effort. Commit custom actions can still trigger
 // rollback; never emit INSTALLMESSAGE_ERROR or return failure after removal.
 static void cleanup_log(MSIHANDLE install, const std::wstring& path, const wchar_t* operation, DWORD error) {
@@ -579,11 +675,39 @@ extern "C" __declspec(dllexport) UINT __stdcall CleanupUserData(MSIHANDLE instal
 // embedded script rechecks ownership, exact device identity, hash and trust.
 #include "microphone-cleanup.h"
 #include "EmbeddedPowerShell.h"
+#include "MicrophoneRestart.h"
 extern "C" __declspec(dllexport) UINT __stdcall CleanupMicrophone(MSIHANDLE install) {
     wchar_t system[MAX_PATH]{};
     if (!GetSystemDirectoryW(system, MAX_PATH)) return ERROR_SUCCESS;
     std::wstring executable = std::wstring(system) + L"\\WindowsPowerShell\\v1.0\\powershell.exe";
     DWORD code = embedded_powershell::run(executable, MICROPHONE_CLEANUP, system);
     if (code) cleanup_log(install, L"VB-CABLE", L"managed microphone cleanup", code);
+    // Also covers a restart still owed by an earlier in-app operation.
+    bool owed = false;
+    const LONG carried = microphone_restart::carry(HKEY_LOCAL_MACHINE, microphone_restart::marker_key,
+                                                   microphone_restart::uninstall_signal_key, owed);
+    if (carried != ERROR_SUCCESS) cleanup_log(install, microphone_restart::uninstall_signal_key, L"restart hand-off", carried);
+    return ERROR_SUCCESS;
+}
+
+// Commit actions cannot call MsiSetMode, so this immediate action after
+// InstallFinalize reads the restart owed by the microphone cleanup and asks
+// Windows Installer for its own end-of-uninstall restart prompt. The package
+// keeps REBOOT=ReallySuppress; only this interactive run clears it, so silent
+// runs never restart or prompt.
+extern "C" __declspec(dllexport) UINT __stdcall CheckMicrophoneRestart(MSIHANDLE install) {
+    const auto ui = property(install, L"UILevel");
+    const auto reboot_prompt = property(install, L"REBOOTPROMPT");
+    bool marker = false;
+    const LONG read = microphone_restart::take(HKEY_LOCAL_MACHINE, microphone_restart::uninstall_signal_key, marker);
+    const bool ask = microphone_restart::prompt(ui, reboot_prompt, marker);
+    UINT result = ERROR_SUCCESS;
+    if (ask) {
+        result = MsiSetPropertyW(install, L"REBOOT", L"");
+        if (result == ERROR_SUCCESS) result = MsiSetMode(install, MSIRUNMODE_REBOOTATEND, TRUE);
+    }
+    info(install, L"CheckMicrophoneRestart: owed=" + std::to_wstring(marker) + L", read=" + std::to_wstring(read) +
+        L", UILevel=" + ui + L", REBOOTPROMPT=" + reboot_prompt + L", prompt=" + std::to_wstring(ask) +
+        L", result=" + std::to_wstring(result) + L".");
     return ERROR_SUCCESS;
 }

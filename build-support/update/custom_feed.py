@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Verify a signed fork Release and publish its macOS and Windows update feeds."""
 import argparse
+import base64
 import copy
 import io
 import json
@@ -18,9 +19,12 @@ import zipfile
 import deploy
 import feed
 import feed_site
+import feed_v2
 import mac_release
 import release
 import release_assets
+import published_release
+import rules
 
 sys.path.insert(0, str(feed.ROOT / 'build-support'))
 from identity import IDENTITY, valid_development_identity
@@ -97,17 +101,62 @@ def windows_candidate(state, work, candidate, record, package, config, now):
         asset = platform['artifacts'][0]
         feed.write(inputs / asset['name'], package(asset))
         approved = inputs / 'approved.json'
-        release.sign_package(config, inputs, approved)
+        # published() already bound this public non-prerelease to HEAD and its
+        # exact package digests. Automatic push publication uses that receipt.
+        release.sign_package(config, inputs, approved, {'channel': 'stable', **published_release.update_notes()})
         release.register(config, work, approved, now)
     # Commit reservations and approved records BEFORE signing their sequences.
     # Do not copy uncommitted site files into the still-disabled real snapshot.
-    for name in ('registry.json', 'pending-renewal.json'):
+    for name in ('registry.json', 'pending-renewal.json', 'pending-v2-windows.json'):
         feed.write(state / name, (work / name).read_bytes())
     shutil.copytree(work / 'records', state / 'records', dirs_exist_ok=True)
     command([sys.executable, feed.ROOT / 'build-support/update/reserve.py'])
     feed.write(work / 'registry.json', (state / 'registry.json').read_bytes())
     feed.sign_plans(work, config)
+    feed_v2.sign_plans(work, 'windows', config)
     feed_site.candidate(work, 'windows', candidate)
+
+
+def verify_development_app(app, record, architecture, config):
+    """Verify every native signature against this fork's exact certificate."""
+    sys.path.insert(0, str(feed.ROOT / 'packaging/macos'))
+    from signing import verify_signature
+    info = plistlib.loads((app / 'Contents/Info.plist').read_bytes())
+    feed.require(info.get('CFBundleIdentifier') == 'com.hachiwii.oink' and
+                 info.get('CFBundleVersion') == str(record['build']) and
+                 info.get('CFBundleShortVersionString') == record['version'] and
+                 (info.get('SUPublicEDKey') == config['mac']['public_key'] or
+                  (record['build'] >= mac_release.SPARKLE_FREE_BUILD and 'SUPublicEDKey' not in info)),
+                 'mac_bundle_identity')
+    command(['codesign', '--verify', '--strict', '--deep', app])
+    for binary in app.rglob('*'):
+        if binary.is_file() and not binary.is_symlink():
+            with binary.open('rb') as header:
+                magic = header.read(4)
+            if magic in (b'\xcf\xfa\xed\xfe', b'\xce\xfa\xed\xfe', b'\xca\xfe\xba\xbe', b'\xca\xfe\xba\xbf'):
+                verify_signature(binary, IDENTITY['macos']['team_id'], apple_development=True,
+                                 fingerprint=IDENTITY['macos']['signing_fingerprint'])
+    verify_signature(app, IDENTITY['macos']['team_id'], apple_development=True,
+                     fingerprint=IDENTITY['macos']['signing_fingerprint'])
+    native_arch = 'arm64' if architecture == 'arm64' else 'x86_64'
+    arches = command(['lipo', '-archs', app / 'Contents/MacOS/oink-backend']).decode().split()
+    feed.require(arches == [native_arch], 'mac_archive_architecture')
+
+
+def verify_development_dmg(image, directory, record, architecture, config):
+    sys.path.insert(0, str(feed.ROOT / 'packaging/macos'))
+    from signing import verify_signature
+    command(['codesign', '--verify', '--strict', image])
+    verify_signature(image, IDENTITY['macos']['team_id'], apple_development=True,
+                     fingerprint=IDENTITY['macos']['signing_fingerprint'])
+    mount = directory / 'dmg.noindex'
+    mounted = plistlib.loads(command(['hdiutil', 'attach', image, '-readonly', '-nobrowse', '-noautoopen',
+                                      '-mountpoint', mount, '-plist']))
+    try:
+        verify_development_app(mount / 'Oink.app', record, architecture, config)
+    finally:
+        device = next(row['dev-entry'] for row in mounted['system-entities'] if row.get('mount-point'))
+        command(['hdiutil', 'detach', device])
 
 
 def mac_candidate(state, work, candidate, record, package, tag, cache):
@@ -120,7 +169,8 @@ def mac_candidate(state, work, candidate, record, package, tag, cache):
     signer = prepare(cache) / 'bin/sign_update'
     for platform, architecture, arch_path in (('macos', 'arm64', ''), ('macos-x64', 'x64', 'x64/')):
         metadata = record['platforms'][platform]
-        feed.require(valid_development_identity(metadata) and metadata.get('notarized') is False and
+        feed.require(metadata.get('signing') == 'apple-development' and valid_development_identity(metadata) and
+                     metadata.get('notarized') is False and
                      metadata['built_commit'] == record['built_commit'] and
                      metadata['source_tree_sha256'] == record['source_tree_sha256'] and
                      metadata['build'] == record['build'] and metadata['version'] == record['version'] and
@@ -139,29 +189,10 @@ def mac_candidate(state, work, candidate, record, package, tag, cache):
                 feed.require(all(not Path(item.filename).is_absolute() and '..' not in Path(item.filename).parts
                                  and '\\' not in item.filename for item in members), 'mac_archive_path')
                 info = plistlib.loads(compressed.read('Oink.app/Contents/Info.plist'))
-            feed.require(info.get('CFBundleIdentifier') == 'com.hachiwii.oink' and
-                         info.get('CFBundleVersion') == str(record['build']) and
-                         info.get('CFBundleShortVersionString') == record['version'] and
-                         info.get('SUPublicEDKey') == config['mac']['public_key'], 'mac_bundle_identity')
             staging = folder / 'staging'
             command(['ditto', '-x', '-k', archive, staging])
             app = staging / 'Oink.app'
-            command(['codesign', '--verify', '--strict', '--deep', app])
-            if metadata['signing'] == 'apple-development':
-                sys.path.insert(0, str(feed.ROOT / 'packaging/macos'))
-                from signing import verify_signature
-                for binary in app.rglob('*'):
-                    if binary.is_file() and not binary.is_symlink():
-                        with binary.open('rb') as header:
-                            magic = header.read(4)
-                        if magic in (b'\xcf\xfa\xed\xfe', b'\xce\xfa\xed\xfe', b'\xca\xfe\xba\xbe', b'\xca\xfe\xba\xbf'):
-                            verify_signature(binary, IDENTITY['macos']['team_id'], apple_development=True,
-                                             fingerprint=IDENTITY['macos']['signing_fingerprint'])
-                verify_signature(app, IDENTITY['macos']['team_id'], apple_development=True,
-                                 fingerprint=IDENTITY['macos']['signing_fingerprint'])
-            native_arch = 'arm64' if architecture == 'arm64' else 'x86_64'
-            arches = command(['lipo', '-archs', app / 'Contents/MacOS/oink-backend']).decode().split()
-            feed.require(arches == [native_arch], 'mac_archive_architecture')
+            verify_development_app(app, record, architecture, config)
             signature = mac_release.sign(signer, archive, config['mac']['public_key'])
             publication = {'architecture': architecture, 'build': record['build'], 'version': record['version'],
                            'url': f'https://github.com/{feed.REPOSITORY}/releases/download/{tag}/{asset["name"]}',
@@ -173,12 +204,35 @@ def mac_candidate(state, work, candidate, record, package, tag, cache):
             for channel in ('stable', 'beta'):
                 relative = f'mac/v1/{config["mac"]["epoch"]}/{arch_path}{channel}/appcast.xml'
                 previous = catalog.get(relative)
+                if previous == publication:
+                    continue  # A v1-only retry still needs the v2 DMG catalog.
                 feed.require(previous is None or record['build'] > previous['build'], 'mac_release_not_monotonic')
                 path = work / 'site' / relative
                 mac_release.write_appcast(path, path.read_bytes() if path.exists() else None,
                                           publication, signature, notes)
                 mac_release.sign(signer, path, config['mac']['public_key'], xml=True)
                 catalog[relative] = publication
+            dmg = mac_release.artifact(record, platform, 'dmg')
+            image = folder / dmg['name']
+            feed.write(image, package(dmg))
+            verify_development_dmg(image, folder, record, architecture, config)
+            receipt = mac_release.v2_record(record, platform, architecture, tag, notes, 'stable', dmg,
+                        f'https://github.com/{feed.REPOSITORY}/releases/download/{tag}/{dmg["name"]}',
+                        mac_release.sign(signer, image, config['mac']['public_key']), config['mac']['epoch'])
+            receipt.update({k: publication[k] for k in ('developer_id_verified', 'notarized', 'qualified_build',
+                'development_signing', 'code_signature_verified', 'published_build', 'signing', 'team_id', 'certificate_sha1')})
+            path = work / f'site/mac/releases/{record["build"]}/{architecture}.json'
+            feed.require(not path.exists() or feed.read(path) == receipt, 'release_build_changed')
+            feed.write(path, receipt)
+    now = feed_v2.now()
+    feed_v2.allocate(work, 'mac', config, rules.load(), now, release_build=record['build'])
+    # Persist the Mac reservation independently, while the real site remains
+    # the deployed rollback snapshot. Failed sequences must never be reused.
+    for name in ('registry.json', 'pending-v2-mac.json'):
+        feed.write(state / name, (work / name).read_bytes())
+    command([sys.executable, feed.ROOT / 'build-support/update/reserve.py'])
+    feed.write(work / 'registry.json', (state / 'registry.json').read_bytes())
+    feed_v2.sign_plans(work, 'mac', config, cache)
     catalog_path = work / 'catalog.json'
     feed.write(catalog_path, catalog)
     feed_site.candidate(work, 'mac', candidate, catalog_path)
@@ -233,6 +287,27 @@ def already_published(state, record, tag):
     if not active or not all(record_hash in registry['feeds'].get(epoch['epoch'], {}).get(channel, {}).get('records', [])
                              for epoch in active for channel in epoch['channels']):
         return False
+    for platform in ('windows', 'mac'):
+        config = feed.trust(platform)
+        for epoch, key, architecture, channel in feed_v2.slots(platform, config):
+            relative = feed_v2.relative(platform, epoch, architecture, channel)
+            path = state / 'site' / relative
+            if relative not in registry['platforms'][platform].get('files', {}) or not path.is_file():
+                return False
+            payload = feed.loads(base64.b64decode(feed.read(path)['payload'], validate=True))
+            releases = [r for r in payload['releases'] if r['build'] == record['build']]
+            metadata = record['platforms']['windows' if platform == 'windows' else
+                                           'macos' if architecture == 'arm64' else 'macos-x64']
+            suffix = '.msi' if platform == 'windows' else '.dmg'
+            assets = [a for a in metadata['artifacts'] if a['name'].endswith(suffix)]
+            if len(assets) != 1 or len(releases) != 1:
+                return False
+            asset, item = assets[0], releases[0]
+            if (item['version'] != record['version'] or item['tag'] != tag or
+                    item['sourceTreeSha256'] != record['source_tree_sha256'] or item['channel'] != 'stable' or
+                    item['package']['sha256'] != asset['sha256'] or item['package']['length'] != asset['size'] or
+                    item['package']['url'] != f'https://github.com/{feed.REPOSITORY}/releases/download/{tag}/{asset["name"]}'):
+                return False
     # Keep the existing signature and public readback boundary even for a no-op retry.
     feed_site.verify_all(state)
     feed_site.verify_public(state)
@@ -256,6 +331,9 @@ def main():
     feed.require(args.release_tag and args.tool_cache, 'custom_feed_arguments')
     feed.require(args.release_tag == 'v' + IDENTITY['version'], 'release_tag_version')
     commit, source = current_source()
+    if not release_assets.current_main(commit):
+        print('Main has advanced; this superseded source will not publish update feeds.')
+        return
     record, package = published(args.release_tag, commit, source)
     os.environ.update(OINK_SOURCE_TREE_SHA256=source, OINK_RELEASE_TAG=args.release_tag,
                       OINK_PUBLISHED_BUILD=str(record['build']))
@@ -274,10 +352,16 @@ def main():
         merged_windows = folder / 'merged-windows'
         feed_site.merge(state, windows, merged_windows, revision)
         feed_site.merge(merged_windows, mac, final, revision + 1)
+        # Package downloads and native verification may take minutes. Reserved
+        # sequence numbers remain spent when a newer source supersedes us.
+        if not release_assets.current_main(commit):
+            print('Main advanced during preparation; update feeds remain unchanged.')
+            return
         fence = {'head': deploy.git('rev-parse', 'HEAD'), 'revision': revision}
         feed.write(Path('transaction.json'), fence)
         try:
             release_assets.publish(final)
+            feed.require(release_assets.current_main(commit), 'superseded_feed_source')
             deploy.commit()
         except BaseException:
             recover()

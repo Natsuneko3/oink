@@ -14,6 +14,7 @@ import shutil
 import tempfile
 import xml.etree.ElementTree as ET
 import feed
+import feed_v2
 
 PLATFORMS = ('mac', 'windows')
 SPARKLE = 'http://www.andymatuschak.org/xml-namespaces/sparkle'
@@ -79,7 +80,11 @@ def appcast(raw, config, channel, verify_signature=True):
 
 def development_publication(record, config):
     """An explicitly opted-in fork package, without claiming Apple qualification."""
+    import sys
+    sys.path.insert(0, str(feed.ROOT / 'build-support'))
+    from identity import valid_development_identity
     return (config['mac'].get('allow_development_updates') is True and
+            record.get('signing') == 'apple-development' and valid_development_identity(record) and
             record.get('development_signing') is True and
             record.get('developer_id_verified') is False and record.get('notarized') is False and
             record.get('code_signature_verified') is True and record.get('qualified_build') is None and
@@ -96,9 +101,10 @@ def verify_platform(state, platform, config, packages=False, signatures=True, ve
     feed.require(enabled, 'enabled_platform_missing_trust')
     actual = {platform + '/' + name: feed.digest(raw) for name, raw in files(state / 'site' / platform).items()}
     feed.require(actual == slot['files'] and actual, 'platform_digest')
+    v2 = {path for path in actual if feed_v2.PATH.fullmatch(path)}
     if platform == 'windows':
         manifests = {feed.relative(e['epoch'], c) for e in config['windows'] for c in e['channels']}
-        for path in set(actual) - manifests:
+        for path in set(actual) - manifests - v2:
             match = re.fullmatch(r'windows/releases/([1-9][0-9]*)/release.json', path)
             feed.require(match is not None, 'windows_feed_path')
             raw = (state / 'site' / path).read_bytes()
@@ -108,8 +114,13 @@ def verify_platform(state, platform, config, packages=False, signatures=True, ve
         feed.verify_site(state, config)
         if packages:
             feed.verify_packages(state, config)
+            for epoch in config['windows']:
+                # Beta-only (v2) records: same public asset/hash/signature checks.
+                hashes = feed.registry(state)['feeds'][epoch['epoch']]['beta'].get('v2_records', [])
+                feed.catalog(state, {'records': hashes}, config, epoch, 'beta')
     else:
-        feed.require(set(slot['catalog']) == set(actual), 'mac_catalog')
+        records = {path for path in actual if feed_v2.MAC_RECORD.fullmatch(path)}
+        feed.require(set(slot['catalog']) == set(actual) - v2 - records, 'mac_catalog')
         verified = set()
         for path, record in slot['catalog'].items():
             match = re.fullmatch(r'mac/v1/mac-2026-01/(x64/)?(stable|beta)/appcast.xml', path)
@@ -122,6 +133,9 @@ def verify_platform(state, platform, config, packages=False, signatures=True, ve
             verified.add(raw)
             latest = max(entries, key=lambda entry: entry['build'])
             feed.require(all(record[k] == v for k, v in latest.items()) and re.fullmatch('[0-9a-f]{64}', record['sha256']), 'mac_catalog')
+    # v2 manifests carry their own sequences and expiry; always verify their
+    # signatures (cheap) and that each signed catalog equals the snapshot records.
+    feed_v2.verify_snapshot(state, platform, config)
 
 
 def verify_all(state, packages=False, signatures=True, verified_mac_files=None):
@@ -137,7 +151,8 @@ def candidate(state, platform, output, catalog=None):
     slot['enabled'] = True
     slot['files'] = {platform + '/' + name: feed.digest(raw) for name, raw in files(state / 'site' / platform).items()}
     if platform == 'mac':
-        slot['catalog'] = feed.read(catalog)
+        # Manifest renewal carries no new appcast catalog.
+        slot['catalog'] = feed.read(catalog) if catalog else slot.get('catalog', {})
         previous = reg['platforms']['mac']
         config = feed.trust('mac')
         for path, record in slot['catalog'].items():
@@ -145,10 +160,20 @@ def candidate(state, platform, output, catalog=None):
                          record == previous.get('catalog', {}).get(path))
             authorized_development = (development_publication(record, config) and
                                       str(record['published_build']) == os.environ.get('OINK_PUBLISHED_BUILD'))
-            feed.require(unchanged or authorized_development or
-                         str(record['qualified_build']) == os.environ.get('OINK_UPDATE_QUALIFIED_BUILD'),
-                         'update_not_qualified')
-    proposal = {'schema': 1, 'platform': platform, 'base_revision': slot['revision'], 'slot': slot}
+            qualified = (record.get('developer_id_verified') is True and record.get('notarized') is True and
+                         record.get('qualified_build') == record.get('build'))
+            feed.require(unchanged or authorized_development or (qualified and
+                         str(record['qualified_build']) == os.environ.get('OINK_UPDATE_QUALIFIED_BUILD')), 'update_not_qualified')
+        for path, digest in slot['files'].items():
+            match = feed_v2.MAC_RECORD.fullmatch(path)
+            if match and digest != previous['files'].get(path):
+                record = feed_v2.mac_record((state / 'site' / path).read_bytes(), path, config['repository'], config)
+                development = development_publication({**record, 'build': record['release']['build']}, config)
+                feed.require((development and match[1] == os.environ.get('OINK_PUBLISHED_BUILD')) or
+                             (not development and match[1] == os.environ.get('OINK_UPDATE_QUALIFIED_BUILD')),
+                             'update_not_qualified')
+    proposal = {'schema': 1, 'platform': platform, 'base_revision': slot['revision'], 'slot': slot,
+                'v2': {path: s for path, s in reg.get('v2', {}).items() if path.startswith(platform + '/')}}
     output.mkdir(parents=True, exist_ok=False)
     shutil.copytree(state / 'site' / platform, output / 'site' / platform)
     if platform == 'windows':
@@ -182,7 +207,10 @@ def merge(state, proposal_dir, output, expected_revision):
         for epoch, channels in proposal['feeds'].items():
             for channel, new in channels.items():
                 current = reg['feeds'][epoch][channel]
-                feed.require(new['last_allocated'] == current['last_allocated'] and new['records'] == current['records'], 'reservation_changed')
+                feed.require(new['last_allocated'] == current['last_allocated'] and new['records'] == current['records'] and
+                             new.get('v2_records') == current.get('v2_records'), 'reservation_changed')
+    feed.require(proposal['v2'] == {path: s for path, s in reg.get('v2', {}).items() if path.startswith(platform + '/')},
+                 'reservation_changed')
     output.mkdir(parents=True, exist_ok=False)
     for directory in ('site', 'records'):
         # Git cannot retain an empty records directory. A Mac-only first
@@ -210,6 +238,10 @@ def merge(state, proposal_dir, output, expected_revision):
         for path, previous in old.get('catalog', {}).items():
             if old['files'][path] != slot['files'][path]:
                 feed.require(slot['catalog'][path]['build'] > previous['build'], 'stale_candidate')
+    for path in proposal['v2']:
+        if path in old['files'] and old['files'][path] != slot['files'][path]:
+            feed.require(feed_v2.sequence((output / 'site' / path).read_bytes()) >
+                         feed_v2.sequence((state / 'site' / path).read_bytes()), 'stale_candidate')
     slot['revision'] += 1
     reg['platforms'][platform] = slot
     reg['revision'] += 1
@@ -228,15 +260,23 @@ def verify_public(state, platform=None, previous=None):
         verify_all(state, signatures=False)
     else:
         verify_platform(state, platform, feed.trust(platform), signatures=False)
+    # The fixed fork Release serves v1, v2 and the heartbeat. Additional
+    # configured origins mirror only the identical v2 manifest bytes.
+    mirrors = [o + '/' for o in feed.sources(feed.trust(platform or 'windows')) if o + '/' != feed.BASE]
     if previous is not None:
         import readback
         expected = public_files(state, platform)
-        readback.verify(expected, public_files(previous, platform))
+        before = public_files(previous, platform)
+        readback.verify(expected, before)
+        for base in mirrors:
+            readback.verify({p: raw for p, raw in expected.items() if feed_v2.PATH.fullmatch(p)},
+                            {p: raw for p, raw in before.items() if feed_v2.PATH.fullmatch(p)}, base=base)
         return
     for path, raw in files(state / 'site').items():
         if platform is not None and not path.startswith(platform + '/'):
             continue
-        feed.require(feed.download(feed.public_url(path), max(feed.MAX_FEED, len(raw)), True, True) == raw, 'deployment_digest')
+        for base in [feed.BASE] + (mirrors if feed_v2.PATH.fullmatch(path) else []):
+            feed.require(feed.download(feed.public_url(path, base), max(feed.MAX_FEED, len(raw)), True, True) == raw, 'deployment_digest')
     verify_absent(state_info(state), PLATFORMS if platform is None else (platform,))
 
 
@@ -254,6 +294,13 @@ def absent_paths(reg, platforms=PLATFORMS):
             # back. Its missing channels are known absence in that snapshot too.
             if not slot['enabled'] or (platform == 'mac' and path not in slot['files']):
                 result.append(path)
+        # New catalog clients request these even when only v1 was deployed.
+        # A rollback must prove that a failed first v2 publication is absent.
+        for arch in (feed_v2.MAC_ARCHES if platform == 'mac' else ('x64',)):
+            for channel in ('stable', 'beta'):
+                path = feed_v2.relative(platform, epoch, arch, channel)
+                if path not in slot['files']:
+                    result.append(path)
     return result
 
 

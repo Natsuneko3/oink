@@ -8,12 +8,15 @@ import re
 import subprocess
 import sys
 
-from identity import IDENTITY
+from identity import IDENTITY, decode_build, encode_build
 from provenance import ROOT, source_tree_sha256
 
 REPOSITORY = 'Natsuneko3/oink'
 PREFIX = f'repos/{REPOSITORY}'
 KIND = 'oink-release-reservation-v1'
+# Existing annotated reservations predate encoded builds. They remain immutable
+# and retryable; no new reservation uses the global counter.
+LEGACY_MAX_BUILD = 117
 VERSION = r'(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)'
 TAG = re.compile(rf'v({VERSION})')
 LEGACY_TAG = re.compile(rf'v({VERSION})(?:-beta\.[1-9][0-9]*)?-custom\.[1-9][0-9]*')
@@ -66,6 +69,12 @@ def annotation_reservation(annotation, tag):
             annotation.get('object', {}).get('type') == 'commit' and
             annotation['object'].get('sha') == record['built_commit'],
             'invalid_release_reservation')
+    if record['build'] > LEGACY_MAX_BUILD:
+        try:
+            encoded, _ = decode_build(record['build'])
+        except ValueError:
+            raise ValueError('invalid_release_reservation') from None
+        require(encoded == record['version'], 'invalid_release_reservation')
     return record
 
 
@@ -101,6 +110,7 @@ def reserve(commit, source, version, run_id, request):
             isinstance(source, str) and re.fullmatch('[0-9a-f]{64}', source) and
             isinstance(version, str) and re.fullmatch(VERSION, version) and
             type(run_id) is int and run_id > 0, 'invalid_release_allocation_input')
+    encode_build(version, 1)
     maximum, latest, allocations = 113, None, []
     builds, runs = set(), set()
 
@@ -138,11 +148,18 @@ def reserve(commit, source, version, run_id, request):
             return allocation
     require(maximum + 1 < 2**31, 'release_build_exhausted')
     base = tuple(map(int, version.split('.')))
-    selected = base if latest is None or base > latest else (*latest[:2], latest[2] + 1)
+    if latest is None or base > latest:
+        selected = base
+    else:
+        major, minor, patch = latest
+        selected = ((major, minor, patch + 1) if patch < 99 else
+                    (major, minor + 1, 0) if minor < 99 else (major + 1, 0, 0))
     release_version = '.'.join(map(str, selected))
+    build = encode_build(release_version, 1)
+    require(build > maximum, 'release_build_exhausted')
     tag = f'v{release_version}'
     record = {'schema': 1, 'kind': KIND, 'version': release_version, 'base_version': version,
-              'tag': tag, 'build': maximum + 1,
+              'tag': tag, 'build': build,
               'built_commit': commit, 'source_tree_sha256': source, 'workflow_run_id': run_id}
     annotation = request(f'{PREFIX}/git/tags', 'POST', {
         'tag': tag, 'message': json.dumps(record, sort_keys=True), 'object': commit, 'type': 'commit'})

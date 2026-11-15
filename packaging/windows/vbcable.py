@@ -60,6 +60,32 @@ def verify_cleanup(tables):
         valid = False
     if not valid:
         raise RuntimeError('MSI microphone cleanup must be SYSTEM commit-only on standalone uninstall')
+    verify_restart_prompt(tables)
+
+
+def verify_restart_prompt(tables):
+    """Only an immediate action after the committed cleanup may request the restart prompt;
+    every other run keeps REBOOT=ReallySuppress."""
+    actions = {row[0]: row for row in tables.get('CustomAction', [])}
+    execute = {row[0]: row for row in tables.get('InstallExecuteSequence', [])}
+    properties = dict(tables.get('Property', []))
+    try:
+        valid = (actions['CheckMicrophoneRestart'][1:4] == ['65', 'InstallerCA', 'CheckMicrophoneRestart']
+                 and execute['CheckMicrophoneRestart'][1] == 'REMOVE~="ALL" AND NOT UPGRADINGPRODUCTCODE'
+                 and int(execute['InstallFinalize'][2]) < int(execute['CheckMicrophoneRestart'][2])
+                 and properties.get('REBOOT') == 'ReallySuppress'
+                 and not any(row[0] == 'CheckMicrophoneRestart' for row in tables.get('InstallUISequence', []))
+                 and not any(row[2] == 'DoAction' and row[3] == 'CheckMicrophoneRestart'
+                             for row in tables.get('ControlEvent', [])))
+        # Full UI prompts in the client: only its copy of REBOOT is cleared, and
+        # only by the maintenance wizard's Remove button.
+        clears = sorted(row[:4] for row in tables.get('ControlEvent', []) if row[2] == '[REBOOT]')
+        valid = (valid and clears == [['VerifyReadyDlg', button, '[REBOOT]', '{}'] for button in ('Remove', 'RemoveNoShield')]
+                 and not any(row[2] == 'REBOOT' for row in actions.values()))
+    except (KeyError, ValueError, IndexError):
+        valid = False
+    if not valid:
+        raise RuntimeError('MSI microphone restart prompt must be an immediate post-commit uninstall action with REBOOT suppressed by default')
 
 
 def cleanup_header(script):

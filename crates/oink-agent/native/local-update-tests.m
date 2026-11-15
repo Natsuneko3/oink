@@ -1,6 +1,9 @@
 // Read-only genuine-signature checks plus disposable copied bundles. Never launch
 // the supplied reference app. clang -fobjc-arc -framework AppKit -framework
 // Security local-update-tests.m -o <external-evidence>/local-update-tests
+// Pass the same OINK_SIGNING_TEAM / OINK_DEVELOPMENT_FINGERPRINT /
+// OINK_ALLOW_DEVELOPMENT_UPDATES defines as build.rs; the focused Python
+// test_macos_update_identity.py runner reads the reviewed product identity.
 #import "local-update.m"
 @interface FakePackageDrag : NSObject
 @property(strong) NSPasteboard *draggingPasteboard;
@@ -66,9 +69,9 @@ int main(int argc,const char **argv) {
         const char *app=argv[1];
         if (oink_local_verify_app(app)!=0) {puts("genuine reference rejected");return 1;}
         NSString *wrongTeam=[identityRequirement stringByReplacingOccurrencesOfString:@"D765989V7S" withString:@"0000000000"];
-        if (verifyIdentity(app,wrongTeam)!=1) return 3;
+        if (verifyIdentity(app,wrongTeam,YES,NO)!=1) return 3;
         NSString *wrongProduct=[identityRequirement stringByReplacingOccurrencesOfString:@"com.hachiwii.oink" withString:@"com.example.other"];
-        if (verifyIdentity(app,wrongProduct)!=1) return 4;
+        if (verifyIdentity(app,wrongProduct,YES,NO)!=1) return 4;
         NSString *root=[NSTemporaryDirectory() stringByAppendingPathComponent:[NSString stringWithFormat:@"oink-verifier-%@.noindex",NSUUID.UUID.UUIDString]];
         [NSFileManager.defaultManager createDirectoryAtPath:root withIntermediateDirectories:NO attributes:nil error:NULL];
         NSString *copy=[root stringByAppendingPathComponent:@"Oink.app"];

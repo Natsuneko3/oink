@@ -59,7 +59,7 @@ class AllocationTests(unittest.TestCase):
 
     def test_next_identifiers_advance_from_the_real_published_baseline(self):
         selected = self.reserve()
-        self.assertEqual((selected['build'], selected['version'], selected['tag']), (117, '0.3.6', 'v0.3.6'))
+        self.assertEqual((selected['build'], selected['version'], selected['tag']), (306001, '0.3.6', 'v0.3.6'))
         annotation = self.remote.objects[self.remote.refs[selected['tag']]['sha']]
         self.assertEqual(annotation['object'], {'type': 'commit', 'sha': COMMIT})
         self.assertEqual(json.loads(annotation['message']), selected)
@@ -68,7 +68,7 @@ class AllocationTests(unittest.TestCase):
     def test_a_failed_build_keeps_its_reservation_and_the_next_run_advances(self):
         first = self.reserve()
         second = self.reserve(101)
-        self.assertEqual((first['build'], second['build']), (117, 118))
+        self.assertEqual((first['build'], second['build']), (306001, 307001))
         self.assertEqual(second['tag'], 'v0.3.7')
 
     def test_same_run_reuses_its_reservation_without_writing_again(self):
@@ -86,7 +86,7 @@ class AllocationTests(unittest.TestCase):
     def test_new_source_version_sets_a_floor_without_resetting_numeric_build(self):
         self.reserve()
         next_version = self.reserve(101, version='0.4.0')
-        self.assertEqual((next_version['build'], next_version['tag']), (118, 'v0.4.0'))
+        self.assertEqual((next_version['build'], next_version['tag']), (400001, 'v0.4.0'))
 
     def test_unpublished_plain_tag_still_reserves_its_version(self):
         self.remote.refs['v0.3.9'] = {'type': 'commit', 'sha': COMMIT}
@@ -98,7 +98,45 @@ class AllocationTests(unittest.TestCase):
         for n in range(100):
             self.remote.refs[f'unrelated-{n}'] = {'type': 'commit', 'sha': COMMIT}
         selected = self.reserve()
-        self.assertEqual((selected['build'], selected['tag']), (201, 'v0.3.13'))
+        self.assertEqual((selected['build'], selected['tag']), (313001, 'v0.3.13'))
+
+    def test_legacy_plain_reservation_is_kept_and_new_build_encodes_next_version(self):
+        legacy = {'schema': 1, 'kind': versions.KIND, 'version': '0.3.6', 'base_version': '0.3.5',
+                  'tag': 'v0.3.6', 'build': 117, 'built_commit': COMMIT,
+                  'source_tree_sha256': SOURCE, 'workflow_run_id': 99}
+        annotation = self.remote.request(PREFIX + '/git/tags', 'POST', {
+            'tag': legacy['tag'], 'message': json.dumps(legacy), 'object': COMMIT, 'type': 'commit'})
+        self.remote.request(PREFIX + '/git/refs', 'POST', {
+            'ref': 'refs/tags/' + legacy['tag'], 'sha': annotation['sha']})
+        writes = copy.deepcopy(self.remote.writes)
+        self.assertEqual(self.reserve(99), legacy)
+        self.assertEqual(self.remote.writes, writes)
+        selected = self.reserve(version='0.3.6')
+        self.assertEqual((selected['build'], selected['tag']), (307001, 'v0.3.7'))
+
+    def test_encoded_reservation_must_match_its_tag_version(self):
+        selected = self.reserve()
+        annotation = self.remote.objects[self.remote.refs[selected['tag']]['sha']]
+        annotation['message'] = json.dumps({**selected, 'build': 307001})
+        writes = copy.deepcopy(self.remote.writes)
+        with self.assertRaisesRegex(ValueError, 'invalid_release_reservation'):
+            self.reserve(101)
+        self.assertEqual(self.remote.writes, writes)
+
+    def test_minor_patch_and_integer_limits_fail_before_writes(self):
+        for version in ('0.3.100', '0.100.0', '214.74.84'):
+            with self.subTest(version=version), self.assertRaises(ValueError):
+                self.reserve(version=version)
+        self.assertEqual(self.remote.writes, [])
+
+    def test_patch_rollover_reserves_an_encodable_next_version(self):
+        for latest, expected, build in (('0.3.99', '0.4.0', 400001),
+                                         ('0.99.99', '1.0.0', 10000001)):
+            with self.subTest(latest=latest):
+                self.remote = GitHub()
+                self.remote.refs['v' + latest] = {'type': 'commit', 'sha': COMMIT}
+                selected = self.reserve()
+                self.assertEqual((selected['version'], selected['build']), (expected, build))
 
     def test_bad_reserved_metadata_fails_without_creating_another_tag(self):
         selected = self.reserve()
